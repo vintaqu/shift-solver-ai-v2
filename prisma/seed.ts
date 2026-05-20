@@ -1,5 +1,5 @@
 import bcrypt from 'bcryptjs'
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient, LaborRoleLevel } from '@prisma/client'
 import { LEGAL_FRAMEWORK_SEEDS } from '../src/lib/legalFrameworks'
 
 const prisma = new PrismaClient()
@@ -88,10 +88,10 @@ async function main() {
 
   // ---- Labor Roles ----
   const rolesData = [
-    { id: 'role-basic',   name: 'Camarero básico',  level: 'BASIC',        color: '#6366f1', priority: 1, isCritical: false },
-    { id: 'role-semi',    name: 'Semi-encargado',   level: 'SEMI_MANAGER', color: '#0891b2', priority: 2, isCritical: true  },
-    { id: 'role-manager', name: 'Encargado',         level: 'MANAGER',      color: '#7c3aed', priority: 3, isCritical: true  },
-    { id: 'role-owner',   name: 'Dueño',             level: 'OWNER',        color: '#64748b', priority: 4, isCritical: false },
+    { id: 'role-basic',   name: 'Camarero básico',  level: 'BASIC' as LaborRoleLevel,        color: '#6366f1', priority: 1, isCritical: false },
+    { id: 'role-semi',    name: 'Semi-encargado',   level: 'SEMI_MANAGER' as LaborRoleLevel, color: '#0891b2', priority: 2, isCritical: true  },
+    { id: 'role-manager', name: 'Encargado',         level: 'MANAGER' as LaborRoleLevel,      color: '#7c3aed', priority: 3, isCritical: true  },
+    { id: 'role-owner',   name: 'Dueño',             level: 'OWNER' as LaborRoleLevel,        color: '#64748b', priority: 4, isCritical: false },
   ]
   for (const r of rolesData) {
     await prisma.laborRole.upsert({
