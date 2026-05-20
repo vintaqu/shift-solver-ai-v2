@@ -4,6 +4,7 @@ import { getToken } from 'next-auth/jwt'
 
 // Rutas públicas — no requieren auth
 const PUBLIC_ROUTES = [
+  '/',
   '/login',
   '/api/auth',
   '/onboarding',
