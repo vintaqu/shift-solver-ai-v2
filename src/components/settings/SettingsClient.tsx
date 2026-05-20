@@ -39,7 +39,7 @@ function Field({ label, hint, children }: any) {
 
 export function SettingsClient({ organization, members, skills, roles, currentUserId, currentUserRole }: any) {
   const router = useRouter()
-  const [tab, setTab] = useState<'org' | 'users'>('org')
+  const [tab, setTab] = useState<'org' | 'users' | 'skills'>('org')
 
   const isOwner = ['ORG_OWNER', 'SUPER_ADMIN'].includes(currentUserRole)
 

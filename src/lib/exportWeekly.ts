@@ -321,15 +321,6 @@ export async function generateWeeklyExcel(period: any): Promise<Buffer> {
     totalWeekNeto += empNeto
     totalWeekBreak += empBreak
 
-    ws.getRow(row).height = dayAssignments => {
-      // Altura según número de turnos
-      const maxLines = Math.max(...employees.map(e =>
-        Math.max(...Array.from({ length: 7 }, (_, d) =>
-          getAssignments(e.id, d).length
-        ))
-      ))
-      return 18 + maxLines * 14
-    }
     ws.getRow(row).height = 52
     row++
   }

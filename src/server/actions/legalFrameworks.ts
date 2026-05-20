@@ -49,10 +49,10 @@ export async function getEffectiveRules(employeeId: string): Promise<{
 
   if (!framework) return null
 
-  const baseRules = framework.rules as LegalRules
+  const baseRules = framework.rules as unknown as LegalRules
 
   // Aplicar customRules de la organización (solo valores más favorables)
-  const orgCustom = employee.organization.legalFrameworks[0]?.customRules as Partial<LegalRules> | null
+  const orgCustom = employee.organization.legalFrameworks[0]?.customRules as unknown as Partial<LegalRules> | null
   const effectiveRules = orgCustom
     ? mergeRulesFavorable(baseRules, orgCustom)
     : baseRules

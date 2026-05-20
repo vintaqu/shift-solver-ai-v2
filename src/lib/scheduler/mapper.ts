@@ -50,9 +50,9 @@ const HORARIO_APERTURA_DEFAULT: Record<string, HorarioApertura> = {
 function mapEmployee(emp: any): Trabajador {
   const contract = emp.contracts?.[0]
   const roleLevel = emp.skills?.[0]?.laborRole?.level ?? 'BASIC'
-  const skillNames = [...new Set(
+  const skillNames = Array.from(new Set(
     emp.skills?.map((s: any) => s.skill?.name).filter(Boolean) as string[]
-  )]
+  ))
 
   // Contrato
   let contrato: Contrato
@@ -343,7 +343,7 @@ export function mapResponseToAssignments(
       const date = addDays(weekStart, diaIdx)
 
       // Calcular horas nocturnas del tramo (22:00–06:00)
-      function calcNightH(start: string, end: string): number {
+      const calcNightH = (start: string, end: string): number => {
         const toMin = (t: string) => {
           const [h, m] = t.split(':').map(Number)
           return h * 60 + (m || 0)
