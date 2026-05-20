@@ -494,8 +494,8 @@ export async function generateWeeklyExcel(period: any): Promise<Buffer> {
   ws2.getRow(r2).height = 22
 
   // ── Generar buffer ───────────────────────────────────────────────────────
-  const buffer = await wb.xlsx.writeBuffer()
-  return Buffer.from(buffer)
+  const arrayBuffer = await wb.xlsx.writeBuffer()
+  return Buffer.from(arrayBuffer)
 }
 
 // ── Helpers de estilo ─────────────────────────────────────────────────────
