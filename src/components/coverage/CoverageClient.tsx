@@ -315,7 +315,7 @@ export function CoverageClient({ templates, initialTemplateId, initialSlots, rol
             selectedDay={selectedDay}
             roles={roles}
             skills={skills}
-            onEdit={(slot) => setSlotModal(slot)}
+            onEdit={(slot: any) => setSlotModal(slot)}
             onDelete={(id) => {
               startTransition(async () => {
                 await deleteCoverageSlot(id)
