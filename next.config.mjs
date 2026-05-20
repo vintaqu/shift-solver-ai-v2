@@ -13,9 +13,7 @@ const securityHeaders = [
 
 const nextConfig = {
   experimental: {
-    serverComponentsExternalPackages: ['exceljs'],
-  },
-  experimental: {
+    serverComponentsExternalPackages: ['exceljs', 'bcryptjs', '@prisma/client', 'prisma'],
     serverActions: {
       allowedOrigins: [
         'localhost:3000',
