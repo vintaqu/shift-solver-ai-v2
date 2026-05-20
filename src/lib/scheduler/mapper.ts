@@ -270,7 +270,7 @@ export function buildScheduleRequest(
     if (absenceDays.length > 0) {
       // Unir con los días libres ya configurados (restricciones individuales)
       const existing = trabajador.restricciones.dias_libres
-      const merged = [...new Set([...existing, ...absenceDays])]
+      const merged = Array.from(new Set([...existing, ...absenceDays]))
       trabajador.restricciones.dias_libres = merged
     }
     return trabajador

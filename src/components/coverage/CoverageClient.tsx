@@ -299,8 +299,8 @@ export function CoverageClient({ templates, initialTemplateId, initialSlots, rol
             slotMap={slotMap}
             visibleTimes={visibleTimes}
             selectedDay={selectedDay}
-            onEditSlot={(slot) => setSlotModal(slot)}
-            onDeleteSlot={(id) => {
+            onEditSlot={(slot: any) => setSlotModal(slot)}
+            onDeleteSlot={(id: string) => {
               startTransition(async () => {
                 await deleteCoverageSlot(id)
                 toast.success('Slot eliminado')
@@ -316,7 +316,7 @@ export function CoverageClient({ templates, initialTemplateId, initialSlots, rol
             roles={roles}
             skills={skills}
             onEdit={(slot: any) => setSlotModal(slot)}
-            onDelete={(id) => {
+            onDelete={(id: string) => {
               startTransition(async () => {
                 await deleteCoverageSlot(id)
                 toast.success('Slot eliminado')
@@ -446,7 +446,7 @@ function MatrixView({ slotMap, visibleTimes, selectedDay, onEditSlot, onDeleteSl
                   </span>
                 </td>
                 {/* Celdas */}
-                {days.map(d => {
+                {days.map((d: any) => {
                   const slot = slotMap[d][time]
                   const colors = demandColor(slot?.minWorkers ?? 0)
 
@@ -541,7 +541,7 @@ function ListView({ slots, selectedDay, roles, skills, onEdit, onDelete }: any) 
             <span className="text-[11px] text-gray-400">{(daySlots as Slot[]).length} slots · máx. {Math.max(...(daySlots as Slot[]).map(s => s.minWorkers))} personas</span>
           </div>
           <div className="divide-y divide-gray-100">
-            {(daySlots as Slot[]).sort((a, b) => a.startTime.localeCompare(b.startTime)).map(slot => {
+            {(daySlots as Slot[]).sort((a: any, b: any) => a.startTime.localeCompare(b.startTime)).map((slot: any) => {
               const colors = demandColor(slot.minWorkers)
               return (
                 <div key={slot.id} className="flex items-center gap-4 px-5 py-3 hover:bg-gray-50 transition-colors group">

@@ -157,7 +157,7 @@ export function EmployeeListClient({ employees: initial, skills, roles, organiza
             {filtered.map((emp: any) => {
               const contract = emp.contracts?.[0]
               const mainRole = emp.skills?.[0]?.laborRole
-              const empSkills = [...new Map(emp.skills?.map((s: any) => [s.skill?.id, s.skill]).filter((s: any) => s[1])).values()] as any[]
+              const empSkills = Array.from(new Map(emp.skills?.map((s: any) => [s.skill?.id, s.skill]).filter((s: any) => s[1])).values()) as any[]
               const weekH = contract?.weeklyHours || 0
               const initials = `${emp.firstName?.[0] || ''}${emp.lastName?.[0] || ''}`.toUpperCase()
 

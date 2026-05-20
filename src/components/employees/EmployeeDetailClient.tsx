@@ -72,7 +72,7 @@ export function EmployeeDetailClient({ employee: emp, skills: allSkills, roles: 
 
   const contract = emp.contracts?.find((c: any) => c.isActive) || emp.contracts?.[0]
   const mainRoleLevel = emp.skills?.[0]?.laborRole?.level || 'BASIC'
-  const empSkillIds = [...new Set(emp.skills?.map((s: any) => s.skill?.id).filter(Boolean))] as string[]
+  const empSkillIds = Array.from(new Set(emp.skills?.map((s: any) => s.skill?.id).filter(Boolean))) as string[]
   const initials = `${emp.firstName?.[0] || ''}${emp.lastName?.[0] || ''}`.toUpperCase()
 
   // Parse preferencias del contrato (guardadas en notes)
