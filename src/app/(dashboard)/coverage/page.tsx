@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { prisma } from '@/lib/prisma'
 import { requireOrgContext } from '@/lib/session'
 import { CoverageClient } from '@/components/coverage/CoverageClient'

@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { auth } from '@/lib/auth'
 import { redirect } from 'next/navigation'
 import { SidebarNav } from '@/components/shared/SidebarNav'

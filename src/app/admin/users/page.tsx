@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { requireSuperAdmin } from '@/lib/session'
 import { prisma } from '@/lib/prisma'
 import { AdminUsersClient } from '@/components/admin/AdminUsersClient'

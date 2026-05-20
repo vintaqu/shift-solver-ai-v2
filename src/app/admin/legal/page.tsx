@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { requireSuperAdmin } from '@/lib/session'
 import { getLegalFrameworks } from '@/server/actions/legalFrameworks'
 import { LegalFrameworksAdmin } from '@/components/admin/LegalFrameworksAdmin'

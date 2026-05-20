@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { notFound, redirect } from 'next/navigation'
 import { addDays } from 'date-fns'
 import { prisma } from '@/lib/prisma'

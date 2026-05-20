@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { redirect } from 'next/navigation'
 import { requireOrgContext } from '@/lib/session'
 import { getMonthData } from '@/server/actions/planningMonth'

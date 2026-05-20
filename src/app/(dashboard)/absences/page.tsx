@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { prisma } from '@/lib/prisma'
 import { requireOrgContext } from '@/lib/session'
 import { AbsencesClient } from '@/components/absences/AbsencesClient'
