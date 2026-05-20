@@ -1,0 +1,736 @@
+// ============================================================
+// Shift Solver AI — schema.prisma completo
+// PostgreSQL + Prisma ORM
+// Multi-tenant por organizationId
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum UserRole {
+  SUPER_ADMIN  // Admin de la plataforma Shift Solver AI
+  ORG_OWNER    // Dueño del restaurante
+  MANAGER      // Encargado/manager del local
+  EMPLOYEE     // Trabajador — acceso solo al portal de empleado
+}
+
+enum ContractType {
+  FULL_TIME
+  PART_TIME
+  OWNER
+  EXTRA
+  TEMPORAL
+}
+
+enum PlanningStatus {
+  DRAFT
+  GENERATED
+  REVIEWED
+  PUBLISHED
+  ARCHIVED
+}
+
+enum PlanningOrigin {
+  MANUAL
+  AUTOMATIC
+  MIXED
+}
+
+enum AssignmentOrigin {
+  AUTOMATIC
+  MANUAL
+  EDITED
+}
+
+enum AssignmentStatus {
+  DRAFT
+  PUBLISHED
+  CANCELLED
+}
+
+enum AvailabilityType {
+  DAY_OFF          // No puede trabajar ese día/franja
+  NOT_BEFORE       // No puede empezar antes de una hora
+  NOT_AFTER        // No puede terminar después de una hora
+  ONLY_BETWEEN     // Solo puede trabajar en esa franja
+  PREFER           // Prefiere trabajar en esa franja (blanda)
+}
+
+enum AbsenceType {
+  VACACIONES
+  BAJA
+  PERMISO
+  AUSENCIA
+  ASUNTO_PROPIO
+}
+
+enum AbsenceStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum RuleSeverity {
+  INFO
+  WARNING
+  ERROR
+  BLOCKING
+}
+
+enum ClockMethod {
+  APP
+  TERMINAL
+  MANUAL
+  QR
+}
+
+enum ClockStatus {
+  VALID
+  PENDING_REVIEW
+  CORRECTED
+}
+
+enum LaborRoleLevel {
+  BASIC         // Camarero básico
+  SEMI_MANAGER  // Semi-encargado
+  MANAGER       // Encargado
+  OWNER         // Dueño
+}
+
+// ============================================================
+// SAAS / AUTH
+// ============================================================
+
+model User {
+  id             String   @id @default(cuid())
+  email          String   @unique
+  name           String?
+  image          String?
+  hashedPassword String?
+  role           UserRole @default(MANAGER)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  memberships      OrganizationMember[]
+  auditLogs        AuditLog[]
+  resolvedAbsences AbsenceRequest[]   @relation("ResolvedBy")
+  employees        Employee[]
+
+  @@index([email])
+}
+
+model Organization {
+  id            String   @id @default(cuid())
+  name          String
+  slug          String   @unique
+  taxId         String?
+  sector        String?
+  timezone      String   @default("Europe/Madrid")
+  logoUrl       String?  // logo para el portal empleado
+  brandColor    String?  // color corporativo (#hex)
+  loginMessage  String?  // mensaje de bienvenida en login empleado
+  description   String?  // descripción del restaurante
+  config        Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  members       OrganizationMember[]
+  locations     Location[]
+  employees     Employee[]
+  planningPeriods PlanningPeriod[]
+  businessRules BusinessRule[]
+  auditLogs     AuditLog[]
+  subscriptionPlan SubscriptionPlan?
+  billingCustomer  BillingCustomer?
+  laborRoles    LaborRole[]
+  skills        Skill[]
+  shiftTemplates ShiftTemplate[]
+  notifications  Notification[]
+  absenceRequests   AbsenceRequest[]
+  coverageTemplates    CoverageTemplate[]
+  legalFrameworks      OrganizationLegalFramework[]
+
+  @@index([slug])
+}
+
+model OrganizationMember {
+  id             String   @id @default(cuid())
+  userId         String
+  organizationId String
+  role           UserRole @default(EMPLOYEE)
+  joinedAt       DateTime @default(now())
+
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+  @@index([userId])
+}
+
+// ============================================================
+// LOCATIONS
+// ============================================================
+
+model Location {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  address        String?
+  city           String?
+  timezone       String   @default("Europe/Madrid")
+  config         Json?    // config específica del local
+  openingHours   Json?    // { MON: {open: "06:00", close: "00:00"}, ... }
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employees      Employee[]
+  planningPeriods PlanningPeriod[]
+  shiftTemplates ShiftTemplate[]
+  coverageRequirements CoverageRequirement[]
+  coverageTemplates    CoverageTemplate[]
+  scheduleAssignments  ScheduleAssignment[]
+  businessRules  BusinessRule[]
+
+  @@index([organizationId])
+}
+
+// ============================================================
+// EMPLOYEES
+// ============================================================
+
+model Employee {
+  id             String   @id @default(cuid())
+  organizationId String
+  locationId     String?
+  firstName      String
+  lastName       String
+  email          String?
+  phone          String?
+  color          String   @default("#6366f1") // color en cuadrante
+  isActive       Boolean  @default(true)
+  hireDate       DateTime?
+  notes                String?
+  vacationDaysType     String   @default("NATURALES")
+  vacationDaysPerYear  Int      @default(23)
+  // Auth empleado — PIN de acceso al portal
+  pin                  String?  // hasheado con bcrypt
+  userId               String?  @unique  // si el empleado tiene cuenta de usuario
+  // Marco legal aplicable
+  legalFrameworkId     String?  // null = usa el de la organización
+  skipLegalValidation  Boolean  @default(false)  // true = dueño/socio sin validación
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User?          @relation(fields: [userId], references: [id])
+  legalFramework LegalFramework? @relation("EmployeeLegalFramework", fields: [legalFrameworkId], references: [id])
+  location       Location?    @relation(fields: [locationId], references: [id])
+  contracts      EmployeeContract[]
+  skills         EmployeeSkill[]
+  assignments    ScheduleAssignment[]
+  availabilities Availability[]
+  absences       AbsenceRequest[]
+  timeClockEntries TimeClockEntry[]
+  validationIssues ValidationIssue[]
+  notifications  Notification[]
+
+  @@index([organizationId])
+  @@index([locationId])
+  @@index([organizationId, isActive])
+}
+
+model EmployeeContract {
+  id                    String       @id @default(cuid())
+  employeeId            String
+  contractType          ContractType
+  weeklyHours           Float        // horas semanales contratadas
+  minWeeklyHours        Float?       // horquilla mínima
+  maxWeeklyHours        Float?       // horquilla máxima
+  maxDailyHours         Float        @default(9)
+  maxConsecutiveDays    Int          @default(6)
+  minRestBetweenShifts  Float        @default(12) // horas
+  annualMaxHours        Float        @default(1791)
+  hourlyWage            Float?
+  hourlyCost            Float?
+  collectiveAgreement   String?      // convenio aplicable
+  startDate             DateTime
+  endDate               DateTime?
+  isActive              Boolean      @default(true)
+  notes                 String?
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId])
+  @@index([employeeId, isActive])
+}
+
+// ============================================================
+// ROLES Y SKILLS
+// ============================================================
+
+model LaborRole {
+  id             String         @id @default(cuid())
+  organizationId String
+  name           String
+  level          LaborRoleLevel
+  color          String         @default("#6366f1")
+  isCritical     Boolean        @default(false)
+  priority       Int            @default(0)
+  description    String?
+  createdAt      DateTime       @default(now())
+
+  organization         Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employeeSkills       EmployeeSkill[]
+  coverageRequirements CoverageRequirement[]
+  scheduleAssignments  ScheduleAssignment[]
+  shiftTemplates       ShiftTemplate[]
+
+  @@index([organizationId])
+}
+
+model Skill {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String   // BARISTA, CAJERA, COMANDERA, etc.
+  color          String   @default("#f59e0b")
+  description    String?
+  createdAt      DateTime @default(now())
+
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employeeSkills EmployeeSkill[]
+  coverageRequirements CoverageRequirement[]
+
+  @@index([organizationId])
+}
+
+model EmployeeSkill {
+  id          String   @id @default(cuid())
+  employeeId  String
+  laborRoleId String?
+  skillId     String?
+  level       Int      @default(1) // 1-5
+  createdAt   DateTime @default(now())
+
+  employee  Employee   @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  laborRole LaborRole? @relation(fields: [laborRoleId], references: [id])
+  skill     Skill?     @relation(fields: [skillId], references: [id])
+
+  @@index([employeeId])
+}
+
+// ============================================================
+// SHIFT TEMPLATES
+// ============================================================
+
+model ShiftTemplate {
+  id              String   @id @default(cuid())
+  organizationId  String
+  locationId      String?
+  laborRoleId     String?
+  name            String
+  code            String   // M, T, N, PART, LIBRE
+  startTime       String   // "08:00"
+  endTime         String   // "16:00"
+  durationMinutes Int
+  breakMinutes    Int      @default(0)
+  color           String   @default("#6366f1")
+  isNocturnal     Boolean  @default(false)
+  isSplit         Boolean  @default(false)
+  isSpecial       Boolean  @default(false)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  location     Location?    @relation(fields: [locationId], references: [id])
+  laborRole    LaborRole?   @relation(fields: [laborRoleId], references: [id])
+  assignments  ScheduleAssignment[]
+
+  @@index([organizationId])
+}
+
+// ============================================================
+// COVERAGE REQUIREMENTS (necesidades por slot)
+// ============================================================
+
+
+// ── Marco Legal (solo Super Admin puede crear/editar) ─────────────────────
+model LegalFramework {
+  id          String   @id @default(cuid())
+  name        String                          // "Estatuto de los Trabajadores"
+  code        String   @unique                // "ET", "HOSTELERIA_TARRAGONA", etc.
+  description String?
+  scope       String   @default("NACIONAL")   // "NACIONAL" | "AUTONOMICO" | "PROVINCIAL"
+  sector      String?                         // "HOSTELERIA" | "COMERCIO" | null
+  province    String?                         // "Tarragona" | null
+  isActive    Boolean  @default(true)
+  isEditable  Boolean  @default(true)         // false = marco base protegido
+
+  // Parámetros del convenio (JSON flexible)
+  rules       Json
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  organizations OrganizationLegalFramework[]
+  employees     Employee[]                   @relation("EmployeeLegalFramework")
+
+  @@index([code])
+  @@index([isActive])
+}
+
+// ── Asignación de marco legal a organización ──────────────────────────────
+model OrganizationLegalFramework {
+  id               String        @id @default(cuid())
+  organizationId   String
+  legalFrameworkId String
+  isDefault        Boolean       @default(true)
+  // Ajustes del owner (solo hacia valores más favorables para el trabajador)
+  customRules      Json?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  organization  Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  legalFramework LegalFramework @relation(fields: [legalFrameworkId], references: [id])
+
+  @@unique([organizationId, legalFrameworkId])
+  @@index([organizationId])
+}
+
+model CoverageTemplate {
+  id             String   @id @default(cuid())
+  organizationId String
+  locationId     String
+  name           String
+  description    String?
+  color          String   @default("#6366f1")
+  isDefault      Boolean  @default(false)
+  isActive       Boolean  @default(false)
+
+  // Tipo de activación: MANUAL | SCHEDULED
+  activationType   String?
+  // MANUAL: fecha de fin opcional (null = indefinido)
+  activeUntil      DateTime?
+  // SCHEDULED: rango anual recurrente (día/mes)
+  schedStartMonth  Int?     // 1-12
+  schedStartDay    Int?     // 1-31
+  schedEndMonth    Int?     // 1-12
+  schedEndDay      Int?     // 1-31
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization         Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  location             Location             @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  coverageRequirements CoverageRequirement[]
+
+  @@index([organizationId])
+  @@index([locationId])
+  @@index([isActive])
+}
+
+model CoverageRequirement {
+  id             String   @id @default(cuid())
+  organizationId String
+  locationId     String
+  templateId     String?  // null = sin plantilla (legacy)
+  dayOfWeek      Int      // 0=Lun, 6=Dom
+  startTime      String   // "06:00"
+  endTime        String   // "06:30"
+  laborRoleId    String?
+  skillId        String?
+  minWorkers     Int      // mínimo obligatorio
+  idealWorkers   Int      // ideal
+  priority       Int      @default(1)
+  isRequired     Boolean  @default(true)
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  location  Location          @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  template  CoverageTemplate? @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  laborRole LaborRole?        @relation(fields: [laborRoleId], references: [id])
+  skill     Skill?            @relation(fields: [skillId], references: [id])
+
+  @@index([locationId])
+  @@index([locationId, dayOfWeek])
+}
+
+// ============================================================
+// PLANNING
+// ============================================================
+
+model PlanningPeriod {
+  id             String         @id @default(cuid())
+  organizationId String
+  locationId     String
+  weekStart      DateTime       // lunes de la semana
+  weekEnd        DateTime       // domingo
+  status         PlanningStatus @default(DRAFT)
+  origin         PlanningOrigin @default(MANUAL)
+  version        Int            @default(1)
+  parentId       String?        // para historial de versiones
+  apiScore       Float?         // score devuelto por la API
+  apiMetadata    Json?          // metadata completa de la API
+  publishedAt    DateTime?
+  publishedBy    String?
+  notes          String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  location     Location     @relation(fields: [locationId], references: [id])
+  parent       PlanningPeriod?  @relation("PlanningVersions", fields: [parentId], references: [id])
+  versions     PlanningPeriod[] @relation("PlanningVersions")
+  assignments  ScheduleAssignment[]
+  validationIssues ValidationIssue[]
+
+  @@index([organizationId])
+  @@index([locationId])
+  @@index([locationId, weekStart])
+  @@index([organizationId, status])
+}
+
+model ScheduleAssignment {
+  id               String           @id @default(cuid())
+  planningPeriodId String
+  employeeId       String
+  locationId       String
+  laborRoleId      String?
+  shiftTemplateId  String?
+  date             DateTime         // fecha exacta del turno
+  startTime        String           // "08:00"
+  endTime          String           // "16:00"
+  breakMinutes     Int              @default(0)
+  origin           AssignmentOrigin @default(MANUAL)
+  status           AssignmentStatus @default(DRAFT)
+  isLocked         Boolean          @default(false)
+  isSplit          Boolean          @default(false)
+  splitPairId      String?          // para enlazar turnos partidos
+  normalHours      Float            @default(0)
+  nightHours       Float            @default(0)
+  overtimeHours    Float            @default(0)
+  estimatedCost    Float?
+  notes            String?
+  metadata         Json?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  planningPeriod PlanningPeriod @relation(fields: [planningPeriodId], references: [id], onDelete: Cascade)
+  employee       Employee       @relation(fields: [employeeId], references: [id])
+  location       Location       @relation(fields: [locationId], references: [id])
+  laborRole      LaborRole?     @relation(fields: [laborRoleId], references: [id])
+  shiftTemplate  ShiftTemplate? @relation(fields: [shiftTemplateId], references: [id])
+
+  @@index([planningPeriodId])
+  @@index([employeeId, date])
+  @@index([locationId, date])
+  @@index([planningPeriodId, employeeId])
+}
+
+// ============================================================
+// AVAILABILITY & ABSENCES
+// ============================================================
+
+model Availability {
+  id           String           @id @default(cuid())
+  employeeId   String
+  date         DateTime?        // puntual
+  dayOfWeek    Int?             // 0-6 si es recurrente
+  startTime    String?          // null = todo el día
+  endTime      String?
+  type         AvailabilityType @default(DAY_OFF)
+  isRecurring  Boolean          @default(false)
+  notes        String?
+  createdAt    DateTime         @default(now())
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId])
+  @@index([employeeId, date])
+}
+
+model AbsenceRequest {
+  id              String        @id @default(cuid())
+  organizationId  String
+  employeeId      String
+  type            AbsenceType
+  startDate       DateTime
+  endDate         DateTime
+  totalDays       Int           @default(0)   // calculado al aprobar
+  status          AbsenceStatus @default(PENDING)
+  resolvedBy      String?
+  resolvedAt      DateTime?
+  comment         String?       // motivo del empleado
+  managerNote     String?       // nota interna del manager
+  // Campos para solver OR-Tools (exportar restricción de disponibilidad)
+  blocksPlanningPeriods Boolean @default(true)   // si bloquea la planificación automática
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  employee     Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  resolver     User?        @relation("ResolvedBy", fields: [resolvedBy], references: [id])
+
+  @@index([employeeId])
+  @@index([organizationId])
+  @@index([employeeId, startDate, endDate])
+  @@index([organizationId, status])
+  @@index([status])
+}
+
+// ============================================================
+// BUSINESS RULES & VALIDATIONS
+// ============================================================
+
+model BusinessRule {
+  id             String       @id @default(cuid())
+  organizationId String
+  locationId     String?
+  type           String       // MIN_REST, MAX_HOURS_DAY, MAX_HOURS_WEEK, etc.
+  value          Json         // valor configurable
+  severity       RuleSeverity @default(WARNING)
+  isActive       Boolean      @default(true)
+  description    String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  location     Location?    @relation(fields: [locationId], references: [id])
+
+  @@index([organizationId])
+  @@index([organizationId, isActive])
+}
+
+model ValidationIssue {
+  id               String       @id @default(cuid())
+  planningPeriodId String
+  employeeId       String?
+  assignmentId     String?
+  type             String
+  severity         RuleSeverity
+  message          String
+  suggestion       String?
+  isResolved       Boolean      @default(false)
+  resolvedAt       DateTime?
+  createdAt        DateTime     @default(now())
+
+  planningPeriod PlanningPeriod @relation(fields: [planningPeriodId], references: [id], onDelete: Cascade)
+  employee       Employee?      @relation(fields: [employeeId], references: [id])
+
+  @@index([planningPeriodId])
+  @@index([planningPeriodId, isResolved])
+  @@index([employeeId])
+}
+
+// ============================================================
+// TIME CLOCK
+// ============================================================
+
+model TimeClockEntry {
+  id               String      @id @default(cuid())
+  employeeId       String
+  clockIn          DateTime
+  clockOut         DateTime?
+  locationId       String?
+  method           ClockMethod @default(APP)
+  status           ClockStatus @default(VALID)
+  assignmentId     String?     // turno planificado asociado
+  deviationMinutes Int?        // desviación respecto al planificado
+  notes            String?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId])
+  @@index([employeeId, clockIn])
+}
+
+// ============================================================
+// NOTIFICATIONS & AUDIT
+// ============================================================
+
+model Notification {
+  id             String   @id @default(cuid())
+  organizationId String
+  employeeId     String?
+  type           String
+  title          String
+  body           String
+  isRead         Boolean  @default(false)
+  metadata       Json?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employee     Employee?    @relation(fields: [employeeId], references: [id])
+
+  @@index([organizationId])
+  @@index([employeeId, isRead])
+}
+
+model AuditLog {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String?
+  action         String   // CREATE, UPDATE, DELETE, PUBLISH, etc.
+  entity         String   // ScheduleAssignment, PlanningPeriod, etc.
+  entityId       String
+  before         Json?
+  after          Json?
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id])
+
+  @@index([organizationId])
+  @@index([entity, entityId])
+  @@index([organizationId, createdAt])
+}
+
+// ============================================================
+// BILLING / SUBSCRIPTION
+// ============================================================
+
+model SubscriptionPlan {
+  id             String   @id @default(cuid())
+  organizationId String   @unique
+  plan           String   @default("FREE") // FREE, STARTER, PRO, ENTERPRISE
+  status         String   @default("ACTIVE")
+  maxLocations   Int      @default(1)
+  maxEmployees   Int      @default(10)
+  stripeSubId    String?
+  currentPeriodEnd DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+model BillingCustomer {
+  id             String   @id @default(cuid())
+  organizationId String   @unique
+  stripeCustomerId String?
+  email          String?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
