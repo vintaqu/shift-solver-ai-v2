@@ -13,6 +13,9 @@ const securityHeaders = [
 
 const nextConfig = {
   experimental: {
+    serverComponentsExternalPackages: ['exceljs'],
+  },
+  experimental: {
     serverActions: {
       allowedOrigins: [
         'localhost:3000',
