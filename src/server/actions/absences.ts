@@ -70,7 +70,7 @@ export async function createAbsence(data: {
   const absence = await prisma.absenceRequest.create({
     data: {
       organizationId: data.organizationId,
-      employeeId:     data.employeeId,
+      employeeId: data.employeeId,
       type:           data.type as any,
       startDate:      start,
       endDate:        end,
@@ -171,16 +171,18 @@ export async function approveAbsence(id: string, managerNote?: string) {
     include: { employee: true },
   })
 
-  // Notificación
-  await prisma.notification.create({
-    data: {
-      organizationId: existing.organizationId,
-      employeeId:     existing.employeeId,
-      type:           'ABSENCE_APPROVED',
-      title:          'Ausencia aprobada',
-      body:           `Tu solicitud de ${ABSENCE_LABELS[existing.type] ?? existing.type} del ${format(new Date(existing.startDate), 'dd/MM/yyyy')} al ${format(new Date(existing.endDate), 'dd/MM/yyyy')} ha sido aprobada.`,
-    },
-  })
+  // Notificación al empleado (si tiene usuario vinculado)
+  if (existing.employee?.userId) {
+    await prisma.notification.create({
+      data: {
+        organizationId: existing.organizationId,
+        userId:         existing.employee.userId,
+        type:           'ABSENCE_APPROVED',
+        title:          'Ausencia aprobada',
+        message:        `Tu solicitud de ${ABSENCE_LABELS[existing.type] ?? existing.type} del ${format(new Date(existing.startDate), 'dd/MM/yyyy')} al ${format(new Date(existing.endDate), 'dd/MM/yyyy')} ha sido aprobada.`,
+      },
+    })
+  }
 
   revalidatePath('/absences')
   revalidatePath(`/employees/${existing.employeeId}`)
@@ -204,10 +206,10 @@ export async function rejectAbsence(id: string, managerNote: string) {
   await prisma.notification.create({
     data: {
       organizationId: existing.organizationId,
-      employeeId:     existing.employeeId,
+      userId: existing.employee?.userId ?? '',
       type:           'ABSENCE_REJECTED',
       title:          'Ausencia no aprobada',
-      body:           `Tu solicitud ha sido denegada. Motivo: ${managerNote}`,
+      message: `Tu solicitud ha sido denegada. Motivo: ${managerNote}`,
     },
   })
 
