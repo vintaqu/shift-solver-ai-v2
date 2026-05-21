@@ -79,7 +79,7 @@ export async function createAbsence(data: {
       comment:        data.comment?.trim() || null,
       blocksPlanningPeriods: data.blocksPlanningPeriods ?? true,
     },
-    include: { employee: true },
+    include: { employee: { include: { user: { select: { id: true } } } } },
   })
 
   revalidatePath('/absences')
@@ -98,7 +98,7 @@ export async function updateAbsence(id: string, data: {
 }) {
   const existing = await prisma.absenceRequest.findUnique({
     where: { id },
-    include: { employee: true },
+    include: { employee: { include: { user: { select: { id: true } } } } },
   })
   if (!existing) throw new Error('Ausencia no encontrada')
   if (existing.status === 'APPROVED') throw new Error('No se puede editar una ausencia aprobada')
@@ -142,7 +142,7 @@ export async function deleteAbsence(id: string) {
 export async function approveAbsence(id: string, managerNote?: string) {
   const existing = await prisma.absenceRequest.findUnique({
     where: { id },
-    include: { employee: true },
+    include: { employee: { include: { user: { select: { id: true } } } } },
   })
   if (!existing) throw new Error('Ausencia no encontrada')
 
@@ -168,15 +168,15 @@ export async function approveAbsence(id: string, managerNote?: string) {
       resolvedAt: new Date(),
       ...(managerNote && { managerNote }),
     },
-    include: { employee: true },
+    include: { employee: { include: { user: { select: { id: true } } } } },
   })
 
   // Notificación al empleado (si tiene usuario vinculado)
-  if (existing.employee?.userId) {
+  if (existing.employee?.user?.id) {
     await prisma.notification.create({
       data: {
         organizationId: existing.organizationId,
-        userId:         existing.employee.userId,
+        userId:         existing.employee.user?.id ?? '',
         type:           'ABSENCE_APPROVED',
         title:          'Ausencia aprobada',
         message:        `Tu solicitud de ${ABSENCE_LABELS[existing.type] ?? existing.type} del ${format(new Date(existing.startDate), 'dd/MM/yyyy')} al ${format(new Date(existing.endDate), 'dd/MM/yyyy')} ha sido aprobada.`,
@@ -191,7 +191,10 @@ export async function approveAbsence(id: string, managerNote?: string) {
 
 // ── Rechazar ausencia ──────────────────────────────────────────────────────
 export async function rejectAbsence(id: string, managerNote: string) {
-  const existing = await prisma.absenceRequest.findUnique({ where: { id } })
+  const existing = await prisma.absenceRequest.findUnique({
+    where: { id },
+    include: { employee: { include: { user: { select: { id: true } } } } },
+  })
   if (!existing) throw new Error('Ausencia no encontrada')
 
   const updated = await prisma.absenceRequest.update({
@@ -203,15 +206,17 @@ export async function rejectAbsence(id: string, managerNote: string) {
     },
   })
 
-  await prisma.notification.create({
-    data: {
-      organizationId: existing.organizationId,
-      userId: existing.employee?.userId ?? '',
-      type:           'ABSENCE_REJECTED',
-      title:          'Ausencia no aprobada',
-      message: `Tu solicitud ha sido denegada. Motivo: ${managerNote}`,
-    },
-  })
+  if (existing.employee?.user?.id) {
+    await prisma.notification.create({
+      data: {
+        organizationId: existing.organizationId,
+        userId:         existing.employee.user.id,
+        type:           'ABSENCE_REJECTED',
+        title:          'Ausencia no aprobada',
+        message:        `Tu solicitud ha sido denegada. Motivo: ${managerNote}`,
+      },
+    })
+  }
 
   revalidatePath('/absences')
   revalidatePath(`/employees/${existing.employeeId}`)
@@ -234,7 +239,7 @@ export async function getAbsenceBlocksForWeek(
       startDate: { lte: weekEnd },
       endDate:   { gte: weekStart },
     },
-    include: { employee: true },
+    include: { employee: { include: { user: { select: { id: true } } } } },
   })
 
   const blocks: Record<string, string[]> = {}
