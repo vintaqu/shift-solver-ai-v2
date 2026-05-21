@@ -1,5 +1,7 @@
 'use client'
 
+import { ClockWidget } from '@/components/timeclock/ClockWidget'
+
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { signOut } from 'next-auth/react'
@@ -30,7 +32,7 @@ function fmtH(h: number) {
   return m > 0 ? `${hrs}h ${m}m` : `${hrs}h`
 }
 
-export function EmployeePortalClient({ employee, currentWeekShifts, nextWeekShifts, absences, monthHours, monthTarget, now: nowISO }: any) {
+export function EmployeePortalClient({ employee, currentWeekShifts, nextWeekShifts, absences, monthHours, monthTarget, now: nowISO, todayAssignment = null, activeClockEntry = null }: any) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [tab, setTab] = useState<'week' | 'next' | 'absences'>('week')
@@ -151,6 +153,17 @@ export function EmployeePortalClient({ employee, currentWeekShifts, nextWeekShif
             </div>
           </div>
         </div>
+
+        {/* ── Widget de fichaje ── */}
+        <ClockWidget
+          employeeId={employee.id}
+          todayAssignment={todayAssignment ? {
+            startTime: todayAssignment.startTime,
+            endTime: todayAssignment.endTime,
+            breakMinutes: todayAssignment.breakMinutes || 0,
+          } : null}
+          activeEntry={activeClockEntry}
+        />
 
         {/* ── Tabs semana / próxima / ausencias ── */}
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">

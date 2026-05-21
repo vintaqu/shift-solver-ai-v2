@@ -4,7 +4,8 @@ import { auth } from '@/lib/auth'
 import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { EmployeePortalClient } from '@/components/portal/EmployeePortalClient'
-import { addDays, startOfWeek, endOfWeek, format } from 'date-fns'
+import { addDays, startOfWeek, endOfWeek, startOfDay, format } from 'date-fns'
+import { getActiveClockEntry } from '@/server/actions/timeclock'
 
 export default async function PortalPage() {
   const session = await auth()
@@ -19,7 +20,8 @@ export default async function PortalPage() {
   const nextWeekStart = addDays(weekStart, 7)
   const nextWeekEnd = addDays(weekEnd, 7)
 
-  const [employee, currentWeekShifts, nextWeekShifts, absences] = await Promise.all([
+  const today = startOfDay(now)
+  const [employee, currentWeekShifts, nextWeekShifts, absences, activeClockEntry] = await Promise.all([
     prisma.employee.findUnique({
       where: { id: employeeId },
       include: {
@@ -59,9 +61,18 @@ export default async function PortalPage() {
       },
       orderBy: { startDate: 'asc' },
     }),
+
+    // Fichaje activo hoy
+    getActiveClockEntry(employeeId),
   ])
 
   if (!employee) redirect('/login')
+
+  // Turno de hoy para el widget de fichaje
+  const todayAssignment = currentWeekShifts.find(s => {
+    const d = new Date(s.date)
+    return d.toDateString() === now.toDateString()
+  }) ?? null
 
   // Horas del mes
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
@@ -89,6 +100,8 @@ export default async function PortalPage() {
       monthHours={Math.round(monthHours * 10) / 10}
       monthTarget={Math.round(weeklyTarget * 4.33 * 10) / 10}
       now={now.toISOString()}
+      todayAssignment={todayAssignment ? JSON.parse(JSON.stringify(todayAssignment)) : null}
+      activeClockEntry={activeClockEntry ? JSON.parse(JSON.stringify(activeClockEntry)) : null}
     />
   )
 }
