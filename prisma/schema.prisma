@@ -87,17 +87,14 @@ enum RuleSeverity {
   BLOCKING
 }
 
-enum ClockMethod {
-  APP
-  TERMINAL
-  MANUAL
-  QR
-}
+
 
 enum ClockStatus {
-  VALID
-  PENDING_REVIEW
-  CORRECTED
+  PENDING
+  COMPLETE
+  INCOMPLETE
+  OVERTIME
+  INCIDENT
 }
 
 enum LaborRoleLevel {
@@ -122,10 +119,12 @@ model User {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  memberships      OrganizationMember[]
-  auditLogs        AuditLog[]
-  resolvedAbsences AbsenceRequest[]   @relation("ResolvedBy")
-  employees        Employee[]
+  memberships          OrganizationMember[]
+  auditLogs            AuditLog[]
+  resolvedAbsences     AbsenceRequest[]   @relation("ResolvedBy")
+  employees            Employee[]
+  clockModifications   TimeClockEntry[]   @relation("ClockModifications")
+  notifications        Notification[]
 
   @@index([email])
 }
@@ -160,6 +159,7 @@ model Organization {
   absenceRequests   AbsenceRequest[]
   coverageTemplates    CoverageTemplate[]
   legalFrameworks      OrganizationLegalFramework[]
+  timeClockEntries     TimeClockEntry[]
 
   @@index([slug])
 }
@@ -246,7 +246,6 @@ model Employee {
   absences       AbsenceRequest[]
   timeClockEntries TimeClockEntry[]
   validationIssues ValidationIssue[]
-  notifications  Notification[]
 
   @@index([organizationId])
   @@index([locationId])
@@ -695,4 +694,72 @@ enum ClockEntryType {
   MANUAL
   AUTO_COMPLETE
   MODIFIED
+}
+
+model Notification {
+  id             String   @id @default(cuid())
+  userId         String
+  organizationId String
+  type           String
+  title          String
+  message        String
+  isRead         Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([organizationId])
+  @@index([isRead])
+}
+
+model AuditLog {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String?
+  action         String
+  entity         String
+  entityId       String?
+  oldValues      Json?
+  newValues      Json?
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id])
+
+  @@index([organizationId])
+  @@index([entity])
+  @@index([createdAt])
+}
+
+model SubscriptionPlan {
+  id             String   @id @default(cuid())
+  organizationId String   @unique
+  plan           String   @default("FREE")
+  status         String   @default("ACTIVE")
+  maxEmployees   Int      @default(10)
+  maxLocations   Int      @default(1)
+  trialEndsAt    DateTime?
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+  stripeCustomerId   String?
+  stripeSubId        String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+model BillingCustomer {
+  id             String   @id @default(cuid())
+  organizationId String   @unique
+  stripeId       String   @unique
+  email          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 }
