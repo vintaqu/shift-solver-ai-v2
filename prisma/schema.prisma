@@ -644,23 +644,65 @@ model ValidationIssue {
 // ============================================================
 
 model TimeClockEntry {
-  id               String      @id @default(cuid())
-  employeeId       String
-  clockIn          DateTime
-  clockOut         DateTime?
-  locationId       String?
-  method           ClockMethod @default(APP)
-  status           ClockStatus @default(VALID)
-  assignmentId     String?     // turno planificado asociado
-  deviationMinutes Int?        // desviación respecto al planificado
-  notes            String?
-  createdAt        DateTime    @default(now())
-  updatedAt        DateTime    @updatedAt
+  id             String         @id @default(cuid())
+  employeeId     String
+  organizationId String
+  date           DateTime       @db.Date
 
-  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  clockIn        DateTime?
+  clockOut       DateTime?
+
+  scheduledStart String?
+  scheduledEnd   String?
+  assignmentId   String?
+
+  entryType      ClockEntryType @default(MANUAL)
+  status         ClockStatus    @default(PENDING)
+
+  scheduledMinutes Int?
+  workedMinutes    Int?
+  extraMinutes     Int?
+
+  clockInLat   Float?
+  clockInLng   Float?
+  clockOutLat  Float?
+  clockOutLng  Float?
+
+  autoCompletedIn  Boolean @default(false)
+  autoCompletedOut Boolean @default(false)
+
+  originalClockIn    DateTime?
+  originalClockOut   DateTime?
+  modifiedById       String?
+  modifiedAt         DateTime?
+  modificationReason String?
+
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  employee     Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  modifiedBy   User?        @relation("ClockModifications", fields: [modifiedById], references: [id])
 
   @@index([employeeId])
-  @@index([employeeId, clockIn])
+  @@index([organizationId])
+  @@index([date])
+  @@index([status])
+}
+
+enum ClockEntryType {
+  MANUAL
+  AUTO_COMPLETE
+  MODIFIED
+}
+
+enum ClockStatus {
+  PENDING
+  COMPLETE
+  INCOMPLETE
+  OVERTIME
+  INCIDENT
 }
 
 // ============================================================
@@ -733,4 +775,80 @@ model BillingCustomer {
   createdAt      DateTime @default(now())
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+model TimeClockEntry {
+  id             String         @id @default(cuid())
+  employeeId     String
+  organizationId String
+  date           DateTime       @db.Date
+
+  clockIn        DateTime?
+  clockOut       DateTime?
+
+  scheduledStart String?
+  scheduledEnd   String?
+  assignmentId   String?
+
+  entryType      ClockEntryType @default(MANUAL)
+  status         ClockStatus    @default(PENDING)
+
+  scheduledMinutes Int?
+  workedMinutes    Int?
+  extraMinutes     Int?
+
+  clockInLat   Float?
+  clockInLng   Float?
+  clockOutLat  Float?
+  clockOutLng  Float?
+
+  autoCompletedIn  Boolean @default(false)
+  autoCompletedOut Boolean @default(false)
+
+  originalClockIn    DateTime?
+  originalClockOut   DateTime?
+  modifiedById       String?
+  modifiedAt         DateTime?
+  modificationReason String?
+
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  employee     Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  modifiedBy   User?        @relation("ClockModifications", fields: [modifiedById], references: [id])
+
+  @@index([employeeId])
+  @@index([organizationId])
+  @@index([date])
+  @@index([status])
+}
+
+enum ClockEntryType {
+  MANUAL
+  AUTO_COMPLETE
+  MODIFIED
+}
+
+enum ClockStatus {
+  PENDING
+  COMPLETE
+  INCOMPLETE
+  OVERTIME
+  INCIDENT
+}
+
+enum ClockEntryType {
+  MANUAL          // Fichaje normal por el empleado
+  AUTO_COMPLETE   // Completado automáticamente por el sistema
+  MODIFIED        // Modificado por el manager
+}
+
+enum ClockStatus {
+  PENDING         // Entrada fichada, sin salida aún
+  COMPLETE        // Entrada y salida fichadas
+  INCOMPLETE      // Sin fichaje (auto-completado o incidencia)
+  OVERTIME        // Horas extra registradas
+  INCIDENT        // Incidencia — llegada tarde, salida anticipada, etc.
 }

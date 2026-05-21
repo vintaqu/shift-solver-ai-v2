@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, CalendarDays, Users, ClipboardList,
-  UserX, Settings, LogOut, Sparkles, BarChart2, Shield,
+  UserX, Settings, LogOut, Sparkles, BarChart2, Shield, Clock,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { signOut } from 'next-auth/react'
@@ -16,6 +16,7 @@ const NAV_ITEMS = [
   { href: '/employees',  label: 'Empleados',    icon: Users,           roles: ['SUPER_ADMIN','ORG_OWNER','MANAGER'] },
   { href: '/coverage',   label: 'Cobertura',    icon: ClipboardList,   roles: ['SUPER_ADMIN','ORG_OWNER','MANAGER'] },
   { href: '/absences',   label: 'Ausencias',    icon: UserX,           roles: ['SUPER_ADMIN','ORG_OWNER','MANAGER'] },
+  { href: '/timeclock',  label: 'Fichajes',     icon: Clock,           roles: ['SUPER_ADMIN','ORG_OWNER','MANAGER'] },
   { href: '/reports',    label: 'Informes',     icon: BarChart2,       roles: ['SUPER_ADMIN','ORG_OWNER','MANAGER'] },
   { href: '/settings',   label: 'Ajustes',      icon: Settings,        roles: ['SUPER_ADMIN','ORG_OWNER'] },
   { href: '/admin',      label: 'Super Admin',  icon: Shield,          roles: ['SUPER_ADMIN'] },
