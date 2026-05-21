@@ -89,7 +89,7 @@ export async function createAssignment(planningPeriodId: string, values: {
       action: 'CREATE',
       entity: 'ScheduleAssignment',
       entityId: assignment.id,
-      after: assignment as object,
+      newValues: assignment as object,
     },
   })
 
@@ -139,8 +139,8 @@ export async function updateAssignment(assignmentId: string, values: {
       action: 'UPDATE',
       entity: 'ScheduleAssignment',
       entityId: assignmentId,
-      before: existing as object,
-      after: updated as object,
+      oldValues: existing as object,
+      newValues: updated as object,
     },
   })
 
