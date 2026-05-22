@@ -6,12 +6,14 @@ import { SidebarNav } from '@/components/shared/SidebarNav'
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const session = await auth()
-
   if (!session?.user) redirect('/login')
-  if (session.user.role === 'EMPLOYEE') redirect('/portal')
+
+  const role = session.user.role
+  if (role === 'SUPER_ADMIN') redirect('/admin')
+  if (role === 'EMPLOYEE') redirect('/portal')
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-50">
+    <div className="flex h-screen overflow-hidden bg-[#f5f6fa]">
       <SidebarNav
         user={{
           name: session.user.name,

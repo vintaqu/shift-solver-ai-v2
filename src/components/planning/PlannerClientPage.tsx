@@ -592,15 +592,12 @@ export function PlannerClientPage({ period, employees, weekDays, allPeriods, abs
             )
           })}
 
-          {/* Fila totales */}
-          <div
-            className="grid bg-gray-50 border-t border-gray-300"
-            style={{ gridTemplateColumns: '200px repeat(7, 1fr) 88px' }}
-          >
-            <div className="px-4 py-3 border-r border-gray-200">
-              <span className="text-[12px] font-bold text-gray-600">TOTALES</span>
-            </div>
-            {weekDays.map((dayIso, i) => {
+          {/* Fila totales — sticky bottom */}
+          <div className="flex border-t border-gray-300 bg-white sticky bottom-0 z-20">
+        <div className="w-[180px] min-w-[180px] px-4 py-3 font-bold text-[12px] text-gray-500 uppercase tracking-wider border-r border-gray-200 sticky left-0 bg-gray-50 z-10">
+          TOTALES
+        </div>
+        {weekDays.map((dayIso, i) => {
               const dayAssignments = employees.flatMap((e: any) =>
                 assignmentsByEmpDay[e.id]?.[i] || [])
               const totalBruto = dayAssignments.reduce((s: number, a: any) =>
@@ -622,7 +619,7 @@ export function PlannerClientPage({ period, employees, weekDays, allPeriods, abs
                 </div>
               )
             })}
-            {/* Total semana — columna derecha */}
+            {/* Total semana global */}
             {(() => {
               const totalBruto = employees.reduce((acc: number, e: any) => acc + empWeekHoursBruto(e.id), 0)
               const totalNeto  = employees.reduce((acc: number, e: any) => acc + empWeekHours(e.id), 0)

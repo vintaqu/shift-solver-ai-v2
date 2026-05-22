@@ -39,6 +39,8 @@ export async function createTemplate(data: {
   description?: string
   color: string
   isDefault?: boolean
+  openingTime?: string
+  closingTime?: string
 }) {
   // Si es default, quitar el default de las demás
   if (data.isDefault) {
@@ -57,6 +59,8 @@ export async function createTemplate(data: {
       color: data.color,
       isDefault: data.isDefault ?? false,
       isActive: false,
+      openingTime: data.openingTime ?? '06:00',
+      closingTime: data.closingTime ?? '00:00',
     },
   })
 
@@ -68,6 +72,8 @@ export async function updateTemplate(id: string, data: {
   name?: string
   description?: string
   color?: string
+  openingTime?: string
+  closingTime?: string
   isDefault?: boolean
 }) {
   if (data.isDefault) {

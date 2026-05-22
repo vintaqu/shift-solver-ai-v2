@@ -421,6 +421,8 @@ model CoverageTemplate {
   color          String   @default("#6366f1")
   isDefault      Boolean  @default(false)
   isActive       Boolean  @default(false)
+  openingTime    String   @default("06:00")  // Hora apertura del negocio
+  closingTime    String   @default("00:00")  // Hora cierre (00:00 = medianoche siguiente)
 
   // Tipo de activación: MANUAL | SCHEDULED
   activationType   String?

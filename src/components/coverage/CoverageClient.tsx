@@ -84,6 +84,8 @@ interface Template {
   slotsCount: number
   computedStatus: string
   updatedAt: string
+  openingTime: string
+  closingTime: string
 }
 
 interface Props {
@@ -97,15 +99,29 @@ interface Props {
   openingHours?: Record<string, { open: string; close: string }> | null
 }
 
-// ─── Generar todos los slots de tiempo posibles (06:00 → 00:00 en 30 min) ──
+// ─── Slots 24h completos (00:00 → 23:30) ────────────────────────────────────
+const ALL_TIME_SLOTS_24H: string[] = []
+for (let h = 0; h < 24; h++) {
+  ALL_TIME_SLOTS_24H.push(`${String(h).padStart(2,'0')}:00`)
+  ALL_TIME_SLOTS_24H.push(`${String(h).padStart(2,'0')}:30`)
+}
+
+// ─── Slots en rango horario (puede cruzar medianoche) ────────────────────────
+function getSlotsInRange(openTime: string, closeTime: string): string[] {
+  const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + (m || 0) }
+  const openMin = toMin(openTime)
+  const closeMin = closeTime === '00:00' ? 24 * 60 : toMin(closeTime)
+  const crossesMidnight = closeMin < openMin && closeTime !== '00:00'
+  return ALL_TIME_SLOTS_24H.filter(t => {
+    const min = toMin(t)
+    if (crossesMidnight) return min >= openMin || min < closeMin
+    return min >= openMin && min < closeMin
+  })
+}
+
+// ─── Slots por defecto 06:00 → 00:00 ─────────────────────────────────────────
 function generateTimeSlots(): string[] {
-  const result: string[] = []
-  for (let h = 6; h < 24; h++) {
-    result.push(`${String(h).padStart(2,'0')}:00`)
-    result.push(`${String(h).padStart(2,'0')}:30`)
-  }
-  result.push('00:00')
-  return result
+  return getSlotsInRange('06:00', '00:00')
 }
 
 const ALL_TIME_SLOTS = generateTimeSlots()
@@ -125,6 +141,12 @@ export function CoverageClient({ templates, initialTemplateId, initialSlots, rol
   const [currentSlots, setCurrentSlots] = useState<Slot[]>(initialSlots)
   const [showTemplateManager, setShowTemplateManager] = useState(false)
   const [view, setView] = useState<'matrix' | 'list'>('matrix')
+
+  // Rango horario de la plantilla activa
+  const activeTemplate = templates.find(t => t.id === selectedTemplateId)
+  const templateOpenTime = activeTemplate?.openingTime ?? '06:00'
+  const templateCloseTime = activeTemplate?.closingTime ?? '00:00'
+  const templateTimeSlots = getSlotsInRange(templateOpenTime, templateCloseTime)
 
   // Cuando el usuario cambia de plantilla, recargar página con la nueva
   async function handleTemplateChange(templateId: string) {
@@ -171,10 +193,15 @@ export function CoverageClient({ templates, initialTemplateId, initialSlots, rol
 
   // Slots de tiempo visibles (union de todos los días)
   const visibleTimes = useMemo(() => {
-    if (initialSlots.length === 0) return ALL_TIME_SLOTS.slice(4, 22) // 08:00 – 22:00 por defecto
-    const times = new Set(initialSlots.map(s => s.startTime))
-    return ALL_TIME_SLOTS.filter(t => times.has(t))
-  }, [initialSlots])
+    // Siempre usar el rango de la plantilla como base
+    // Si hay slots fuera del rango (ej. migración), incluirlos también
+    const templateSlotSet = new Set(templateTimeSlots)
+    if (initialSlots.length === 0) return templateTimeSlots
+    const existingTimes = new Set(initialSlots.map(s => s.startTime))
+    // Unión: rango de la plantilla + slots existentes (en orden cronológico de 24h)
+    const allVisible = new Set([...templateTimeSlots, ...ALL_TIME_SLOTS_24H.filter(t => existingTimes.has(t))])
+    return ALL_TIME_SLOTS_24H.filter(t => allVisible.has(t))
+  }, [initialSlots, templateTimeSlots])
 
   // Stats globales
   const stats = {
@@ -366,6 +393,8 @@ export function CoverageClient({ templates, initialTemplateId, initialSlots, rol
           locationId={locationId}
           organizationId={organizationId}
           openingHours={openingHours ?? null}
+          defaultOpenTime={templateOpenTime}
+          defaultCloseTime={templateCloseTime}
           onClose={() => setShowGenerate(false)}
           onGenerated={() => { setShowGenerate(false); router.refresh() }}
         />
@@ -637,7 +666,7 @@ function SlotModal({ slot, defaultDay, defaultTime, locationId, organizationId, 
         <div className="grid grid-cols-2 gap-3">
           <Field label="Hora inicio">
             <select className={inputCls()} value={form.startTime} onChange={e => setForm(f => ({ ...f, startTime: e.target.value }))}>
-              {ALL_TIME_SLOTS.slice(0, -1).map(t => <option key={t} value={t}>{t}</option>)}
+              {ALL_TIME_SLOTS_24H.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
           </Field>
           <Field label="Hora fin">
@@ -952,12 +981,12 @@ function CopyDayModal({ locationId, organizationId, dayRanges, onClose, onCopied
 // ═════════════════════════════════════════════════════════════════════════════
 // MODAL: Generar slots automáticamente
 // ═════════════════════════════════════════════════════════════════════════════
-function GenerateSlotsModal({ locationId, organizationId, openingHours, onClose, onGenerated }: any) {
+function GenerateSlotsModal({ locationId, organizationId, openingHours, defaultOpenTime = '06:00', defaultCloseTime = '00:00', onClose, onGenerated }: any) {
   const [isPending, startTransition] = useTransition()
   const [form, setForm] = useState({
     days: [0,1,2,3,4] as number[],
-    openTime: '08:00',
-    closeTime: '22:00',
+    openTime: defaultOpenTime,
+    closeTime: defaultCloseTime,
     defaultMin: 2,
     defaultIdeal: 3,
   })
@@ -992,12 +1021,12 @@ function GenerateSlotsModal({ locationId, organizationId, openingHours, onClose,
         <div className="grid grid-cols-2 gap-3">
           <Field label="Apertura">
             <select className={inputCls()} value={form.openTime} onChange={e => setForm(f => ({ ...f, openTime: e.target.value }))}>
-              {ALL_TIME_SLOTS.slice(0, -1).map(t => <option key={t} value={t}>{t}</option>)}
+              {ALL_TIME_SLOTS_24H.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
           </Field>
           <Field label="Cierre">
             <select className={inputCls()} value={form.closeTime} onChange={e => setForm(f => ({ ...f, closeTime: e.target.value }))}>
-              {[...ALL_TIME_SLOTS.slice(1), '00:00'].map(t => <option key={t} value={t}>{t}</option>)}
+              {[...ALL_TIME_SLOTS_24H.slice(1), '00:00'].map(t => <option key={t} value={t}>{t}</option>)}
             </select>
           </Field>
         </div>
@@ -1172,7 +1201,7 @@ function TemplateBar({ templates, selectedTemplateId, onManage, onSwitch }: {
 function TemplateManagerModal({ templates, locationId, organizationId, onClose, onChanged }: any) {
   const [isPending, startTransition] = useTransition()
   const [view, setView] = useState<'list' | 'create' | 'activate'>('list')
-  const [createForm, setCreateForm] = useState({ name: '', description: '', color: '#6366f1', isDefault: false })
+  const [createForm, setCreateForm] = useState({ name: '', description: '', color: '#6366f1', isDefault: false, openingTime: '06:00', closingTime: '00:00' })
   const [activating, setActivating] = useState<any | null>(null)
   const [activateForm, setActivateForm] = useState({
     type: 'MANUAL' as 'MANUAL' | 'SCHEDULED',
@@ -1370,6 +1399,35 @@ function TemplateManagerModal({ templates, locationId, organizationId, onClose, 
                   ))}
                 </div>
               </div>
+
+              {/* Horario de operación */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                    Apertura
+                  </label>
+                  <select
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-[13px] bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                    value={createForm.openingTime}
+                    onChange={e => setCreateForm(f => ({ ...f, openingTime: e.target.value }))}>
+                    {ALL_TIME_SLOTS_24H.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                    Cierre
+                  </label>
+                  <select
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-[13px] bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                    value={createForm.closingTime}
+                    onChange={e => setCreateForm(f => ({ ...f, closingTime: e.target.value }))}>
+                    {[...ALL_TIME_SLOTS_24H.slice(1), '00:00'].map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+              </div>
+              <p className="text-[10px] text-gray-400">
+                La grid de cobertura mostrará solo las franjas dentro de este rango.
+              </p>
 
               <div
                 className={cn('flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all', createForm.isDefault ? 'border-indigo-300 bg-indigo-50' : 'border-gray-200')}
