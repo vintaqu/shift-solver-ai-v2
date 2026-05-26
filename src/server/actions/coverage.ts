@@ -59,14 +59,24 @@ export async function deleteCoverageSlot(id: string) {
 }
 
 // ── Copiar un día completo a otro ──────────────────────────────────────────
-export async function copyDaySlots(locationId: string, organizationId: string, fromDay: number, toDay: number) {
-  const source = await prisma.coverageRequirement.findMany({
-    where: { locationId, dayOfWeek: fromDay },
-  })
+export async function copyDaySlots(
+  locationId: string,
+  organizationId: string,
+  fromDay: number,
+  toDay: number,
+  templateId?: string | null,
+) {
+  const where = templateId
+    ? { locationId, dayOfWeek: fromDay, templateId }
+    : { locationId, dayOfWeek: fromDay }
 
-  // Borrar destino
+  const source = await prisma.coverageRequirement.findMany({ where })
+
+  // Borrar destino (solo slots de la misma plantilla si aplica)
   await prisma.coverageRequirement.deleteMany({
-    where: { locationId, dayOfWeek: toDay },
+    where: templateId
+      ? { locationId, dayOfWeek: toDay, templateId }
+      : { locationId, dayOfWeek: toDay },
   })
 
   // Recrear
@@ -75,6 +85,7 @@ export async function copyDaySlots(locationId: string, organizationId: string, f
       data: source.map(s => ({
         locationId,
         organizationId,
+        templateId: s.templateId,
         dayOfWeek: toDay,
         startTime: s.startTime,
         endTime: s.endTime,
@@ -97,82 +108,81 @@ export async function copyDaySlots(locationId: string, organizationId: string, f
 export async function loadCoverageTemplate(
   locationId: string,
   organizationId: string,
-  template: 'restaurante_tipico' | 'cafe_desayunos' | 'bar_noches'
+  template: 'restaurante_tipico' | 'cafe_desayunos' | 'bar_noches',
+  templateId?: string | null,
 ) {
   const TEMPLATES: Record<string, Array<{ day: number; start: string; end: string; min: number; ideal: number }>> = {
     restaurante_tipico: [
       // Lun-Jue (0-3)
-      ...([0,1,2,3].flatMap(day => [
-        { day, start:'06:00', end:'06:30', min:1, ideal:1 },
-        { day, start:'06:30', end:'07:00', min:1, ideal:1 },
-        { day, start:'07:00', end:'08:00', min:2, ideal:2 },
-        { day, start:'08:00', end:'09:30', min:3, ideal:3 },
-        { day, start:'09:30', end:'12:00', min:3, ideal:3 },
-        { day, start:'12:00', end:'12:30', min:3, ideal:3 },
-        { day, start:'12:30', end:'14:00', min:2, ideal:2 },
-        { day, start:'14:00', end:'16:00', min:2, ideal:2 },
-        { day, start:'16:00', end:'18:00', min:2, ideal:2 },
-        { day, start:'18:00', end:'20:00', min:2, ideal:2 },
-        { day, start:'20:00', end:'22:00', min:2, ideal:2 },
-        { day, start:'22:00', end:'00:00', min:2, ideal:2 },
+      ...([0, 1, 2, 3].flatMap(day => [
+        { day, start: '06:00', end: '06:30', min: 1, ideal: 1 },
+        { day, start: '06:30', end: '07:00', min: 1, ideal: 1 },
+        { day, start: '07:00', end: '08:00', min: 2, ideal: 2 },
+        { day, start: '08:00', end: '10:00', min: 2, ideal: 3 },
+        { day, start: '10:00', end: '14:00', min: 3, ideal: 4 },
+        { day, start: '14:00', end: '16:00', min: 2, ideal: 2 },
+        { day, start: '16:00', end: '18:00', min: 1, ideal: 1 },
+        { day, start: '20:00', end: '22:00', min: 2, ideal: 3 },
+        { day, start: '22:00', end: '00:00', min: 2, ideal: 2 },
       ])),
-      // Viernes (4)
+      // Vie (4)
       ...([4].flatMap(day => [
-        { day, start:'06:00', end:'12:00', min:3, ideal:3 },
-        { day, start:'12:00', end:'16:00', min:2, ideal:3 },
-        { day, start:'16:00', end:'18:00', min:2, ideal:2 },
-        { day, start:'18:00', end:'20:00', min:3, ideal:3 },
-        { day, start:'20:00', end:'22:00', min:4, ideal:4 },
-        { day, start:'22:00', end:'00:00', min:4, ideal:4 },
+        { day, start: '06:00', end: '08:00', min: 2, ideal: 2 },
+        { day, start: '08:00', end: '10:00', min: 3, ideal: 3 },
+        { day, start: '10:00', end: '14:00', min: 4, ideal: 4 },
+        { day, start: '14:00', end: '16:00', min: 2, ideal: 3 },
+        { day, start: '20:00', end: '22:00', min: 3, ideal: 4 },
+        { day, start: '22:00', end: '00:00', min: 3, ideal: 4 },
       ])),
       // Sáb-Dom (5-6)
-      ...([5,6].flatMap(day => [
-        { day, start:'06:30', end:'08:00', min:1, ideal:2 },
-        { day, start:'08:00', end:'12:00', min:3, ideal:4 },
-        { day, start:'12:00', end:'16:00', min:2, ideal:3 },
-        { day, start:'16:00', end:'18:00', min:2, ideal:2 },
-        { day, start:'18:00', end:'20:00', min:3, ideal:3 },
-        { day, start:'20:00', end:'22:00', min:4, ideal:4 },
-        { day, start:'22:00', end:'00:00', min:4, ideal:4 },
+      ...([5, 6].flatMap(day => [
+        { day, start: '08:00', end: '10:00', min: 2, ideal: 3 },
+        { day, start: '10:00', end: '14:00', min: 4, ideal: 4 },
+        { day, start: '14:00', end: '16:00', min: 3, ideal: 3 },
+        { day, start: '20:00', end: '22:00', min: 3, ideal: 4 },
+        { day, start: '22:00', end: '00:00', min: 4, ideal: 5 },
       ])),
     ],
     cafe_desayunos: [
-      ...([0,1,2,3,4].flatMap(day => [
-        { day, start:'07:00', end:'09:00', min:2, ideal:3 },
-        { day, start:'09:00', end:'12:00', min:3, ideal:3 },
-        { day, start:'12:00', end:'14:00', min:2, ideal:2 },
-        { day, start:'14:00', end:'16:00', min:1, ideal:1 },
+      ...([0, 1, 2, 3, 4].flatMap(day => [
+        { day, start: '07:00', end: '09:00', min: 2, ideal: 2 },
+        { day, start: '09:00', end: '12:00', min: 3, ideal: 3 },
+        { day, start: '12:00', end: '14:00', min: 2, ideal: 2 },
+        { day, start: '14:00', end: '16:00', min: 1, ideal: 1 },
       ])),
-      ...([5,6].flatMap(day => [
-        { day, start:'08:00', end:'10:00', min:3, ideal:4 },
-        { day, start:'10:00', end:'14:00', min:4, ideal:4 },
-        { day, start:'14:00', end:'16:00', min:2, ideal:2 },
+      ...([5, 6].flatMap(day => [
+        { day, start: '08:00', end: '10:00', min: 3, ideal: 4 },
+        { day, start: '10:00', end: '13:00', min: 4, ideal: 4 },
+        { day, start: '13:00', end: '16:00', min: 2, ideal: 2 },
       ])),
     ],
     bar_noches: [
-      ...([0,1,2,3].flatMap(day => [
-        { day, start:'18:00', end:'20:00', min:1, ideal:2 },
-        { day, start:'20:00', end:'22:00', min:2, ideal:2 },
-        { day, start:'22:00', end:'00:00', min:2, ideal:3 },
+      ...([0, 1, 2, 3].flatMap(day => [
+        { day, start: '18:00', end: '20:00', min: 1, ideal: 2 },
+        { day, start: '20:00', end: '22:00', min: 2, ideal: 2 },
+        { day, start: '22:00', end: '00:00', min: 2, ideal: 3 },
       ])),
-      ...([4,5,6].flatMap(day => [
-        { day, start:'18:00', end:'20:00', min:2, ideal:3 },
-        { day, start:'20:00', end:'22:00', min:3, ideal:4 },
-        { day, start:'22:00', end:'00:00', min:4, ideal:5 },
+      ...([4, 5, 6].flatMap(day => [
+        { day, start: '18:00', end: '20:00', min: 2, ideal: 3 },
+        { day, start: '20:00', end: '22:00', min: 3, ideal: 4 },
+        { day, start: '22:00', end: '00:00', min: 4, ideal: 5 },
       ])),
     ],
   }
 
   const slots = TEMPLATES[template] || []
 
-  // Borrar todos los slots actuales
-  await prisma.coverageRequirement.deleteMany({ where: { locationId } })
+  // Borrar slots actuales (de esta plantilla si aplica, o todos si no)
+  await prisma.coverageRequirement.deleteMany({
+    where: templateId ? { locationId, templateId } : { locationId },
+  })
 
   if (slots.length > 0) {
     await prisma.coverageRequirement.createMany({
       data: slots.map(s => ({
         locationId,
         organizationId,
+        templateId: templateId ?? null,
         dayOfWeek: s.day,
         startTime: s.start,
         endTime: s.end,
@@ -197,10 +207,13 @@ export async function generateSlotsForDay(
   closeTime: string,
   defaultMin: number,
   defaultIdeal: number,
+  templateId?: string | null,
 ) {
-  // Borrar slots del día
+  // Borrar slots del día (filtrando por plantilla si aplica)
   await prisma.coverageRequirement.deleteMany({
-    where: { locationId, dayOfWeek },
+    where: templateId
+      ? { locationId, dayOfWeek, templateId }
+      : { locationId, dayOfWeek },
   })
 
   // Generar slots de 30 min
@@ -212,13 +225,14 @@ export async function generateSlotsForDay(
 
   while (current < closeMinutes) {
     const next = current + 30
-    const startStr = `${String(Math.floor(current/60)).padStart(2,'0')}:${String(current%60).padStart(2,'0')}`
-    const endMin = next >= 24*60 ? next - 24*60 : next
-    const endStr = `${String(Math.floor(endMin/60)).padStart(2,'0')}:${String(endMin%60).padStart(2,'0')}`
+    const startStr = `${String(Math.floor(current / 60)).padStart(2, '0')}:${String(current % 60).padStart(2, '0')}`
+    const endMin = next >= 24 * 60 ? next - 24 * 60 : next
+    const endStr = `${String(Math.floor(endMin / 60)).padStart(2, '0')}:${String(endMin % 60).padStart(2, '0')}`
 
     slots.push({
       locationId,
       organizationId,
+      templateId: templateId ?? null,
       dayOfWeek,
       startTime: startStr,
       endTime: endStr === '00:00' ? '00:00' : endStr,
