@@ -12,7 +12,7 @@ import {
   Copy, RotateCcw, Download, Eye, Loader2, FileSpreadsheet
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { createAssignment, updateAssignment, deleteAssignment, toggleAssignmentLock, publishPlanningPeriod } from '@/server/actions/planning'
+import { createAssignment, updateAssignment, moveAssignment, deleteAssignment, toggleAssignmentLock, publishPlanningPeriod } from '@/server/actions/planning'
 import { GenerateModal } from './GenerateModal'
 
 // ─── Paleta de colores por empleado ───────────────────────────────────────────
@@ -99,6 +99,9 @@ export function PlannerClientPage({ period, employees, weekDays, allPeriods, abs
   const [editor, setEditor] = useState<EditorState>({ open: false, mode: 'create' })
   const [showSummary, setShowSummary] = useState(false)
   const [showWeekPicker, setShowWeekPicker] = useState(false)
+  // ── Drag & Drop state ──
+  const [draggedAssignment, setDraggedAssignment] = useState<{ id: string; empId: string; dayIdx: number } | null>(null)
+  const [dragOverCell, setDragOverCell] = useState<{ empId: string; dayIdx: number } | null>(null)
   const [showGenerate, setShowGenerate] = useState(false)
   const [publishing, setPublishing] = useState(false)
 
@@ -442,9 +445,26 @@ export function PlannerClientPage({ period, employees, weekDays, allPeriods, abs
                     <div
                       key={dayIdx}
                       className={cn(
-                        'border-r border-gray-200 p-1.5 min-h-[72px] relative',
-                        today && 'bg-indigo-50/30'
+                        'border-r border-gray-200 p-1.5 min-h-[72px] relative transition-colors',
+                        today && 'bg-indigo-50/30',
+                        dragOverCell?.empId === emp.id && dragOverCell?.dayIdx === dayIdx && draggedAssignment && 'bg-indigo-100/60 ring-2 ring-inset ring-indigo-400'
                       )}
+                      onDragOver={e => { e.preventDefault(); setDragOverCell({ empId: emp.id, dayIdx }) }}
+                      onDragLeave={() => setDragOverCell(null)}
+                      onDrop={e => {
+                        e.preventDefault()
+                        setDragOverCell(null)
+                        if (!draggedAssignment) return
+                        if (draggedAssignment.empId === emp.id && draggedAssignment.dayIdx === dayIdx) return
+                        const targetDate = new Date(weekDays[dayIdx])
+                        startTransition(async () => {
+                          try {
+                            await moveAssignment(draggedAssignment.id, emp.id, targetDate)
+                            setDraggedAssignment(null)
+                            router.refresh()
+                          } catch (e: any) { toast.error(e.message) }
+                        })
+                      }}
                     >
                       {(() => {
                         const absence = getAbsenceForDay(emp.id, dayIdx)
@@ -513,6 +533,9 @@ export function PlannerClientPage({ period, employees, weekDays, allPeriods, abs
                               key={a.id}
                               assignment={a}
                               color={col}
+                              draggable={period.status !== 'PUBLISHED'}
+                              onDragStart={() => setDraggedAssignment({ id: a.id, empId: emp.id, dayIdx })}
+                              onDragEnd={() => { setDraggedAssignment(null); setDragOverCell(null) }}
                               onEdit={() => openEdit(a)}
                               onDelete={() => {
                                 startTransition(async () => {
@@ -690,7 +713,7 @@ export function PlannerClientPage({ period, employees, weekDays, allPeriods, abs
 // ═════════════════════════════════════════════════════════════════════════════
 // SHIFT PILL — tarjeta visual del turno en el grid
 // ═════════════════════════════════════════════════════════════════════════════
-function ShiftPill({ assignment: a, color, onEdit, onDelete, onToggleLock }: any) {
+function ShiftPill({ assignment: a, color, onEdit, onDelete, onToggleLock, draggable = false, onDragStart, onDragEnd }: any) {
   const [hover, setHover] = useState(false)
   const h = durationH(a.startTime, a.endTime, a.breakMinutes)
   const isNight = timeToMin(a.endTime) <= timeToMin(a.startTime) || timeToMin(a.endTime) >= 22*60
