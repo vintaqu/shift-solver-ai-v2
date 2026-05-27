@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/prisma'
+import { requireOrgContext } from '@/lib/session'
 
 // ── Upsert empleado base ───────────────────────────────────────────────────
 export async function upsertEmployee(data: {
