@@ -113,12 +113,36 @@ function Modal({ title, onClose, children, wide = false }: any) {
   )
 }
 
-function ModalFooter({ onClose, onSave, isPending, saveLabel = 'Guardar', disabled = false }: any) {
+function ModalFooter({ onClose, onSave, isPending, saveLabel = 'Guardar', disabled = false, onDelete, confirmDelete, onConfirmDelete, onCancelDelete }: any) {
   return (
     <div className="flex justify-between items-center pt-4 mt-4 border-t border-gray-100">
-      <button onClick={onClose} className="px-4 py-2 rounded-xl text-[13px] text-gray-500 hover:bg-gray-100 transition-colors">
-        Cancelar
-      </button>
+      <div className="flex items-center gap-2">
+        {confirmDelete ? (
+          <>
+            <span className="text-[12px] text-red-600 font-medium">¿Eliminar este slot?</span>
+            <button onClick={onConfirmDelete} disabled={isPending}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 transition-colors">
+              {isPending ? <Loader2 size={12} className="animate-spin" /> : null} Sí, eliminar
+            </button>
+            <button onClick={onCancelDelete}
+              className="px-3 py-1.5 rounded-lg text-[12px] text-gray-500 hover:bg-gray-100 transition-colors">
+              Cancelar
+            </button>
+          </>
+        ) : (
+          <>
+            <button onClick={onClose} className="px-4 py-2 rounded-xl text-[13px] text-gray-500 hover:bg-gray-100 transition-colors">
+              Cancelar
+            </button>
+            {onDelete && (
+              <button onClick={onDelete} disabled={isPending}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[13px] text-red-500 hover:bg-red-50 border border-red-200 transition-colors disabled:opacity-50">
+                <Trash2 size={13} /> Eliminar slot
+              </button>
+            )}
+          </>
+        )}
+      </div>
       <button
         onClick={onSave}
         disabled={isPending || disabled}
@@ -960,6 +984,17 @@ function SlotModal({ slot, defaultDay, defaultTime, locationId, organizationId, 
         onClose={onClose}
         saveLabel={isEdit ? 'Guardar cambios' : 'Crear slot'}
         isPending={isPending}
+        onDelete={isEdit ? () => setConfirmDelete(true) : undefined}
+        confirmDelete={confirmDelete}
+        onConfirmDelete={() => startTransition(async () => {
+          try {
+            await deleteCoverageSlot(slot.id)
+            toast.success('Slot eliminado')
+            onSaved()
+          } catch (e: any) { toast.error(e.message) }
+          setConfirmDelete(false)
+        })}
+        onCancelDelete={() => setConfirmDelete(false)}
         onSave={() => startTransition(async () => {
           try {
             await upsertCoverageSlot({ id: slot?.id, locationId, organizationId, templateId, ...form, laborRoleId: form.laborRoleId || null, skillId: form.skillId || null })
