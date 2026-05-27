@@ -217,3 +217,23 @@ export async function ensureSkillsAndRoles(organizationId: string) {
     roles: await prisma.laborRole.findMany({ where: { organizationId }, orderBy: { priority: 'asc' } }),
   }
 }
+
+// ── Actualizar orden de empleados en el cuadrante ────────────────────────────
+export async function updateEmployeeOrder(orderedIds: string[]) {
+  const { organizationId } = await requireOrgContext()
+
+  // Verificar que todos pertenecen a la organización
+  const count = await prisma.employee.count({
+    where: { organizationId, id: { in: orderedIds } },
+  })
+  if (count !== orderedIds.length) throw new Error('Empleados no válidos')
+
+  await Promise.all(
+    orderedIds.map((id, index) =>
+      prisma.employee.update({ where: { id }, data: { displayOrder: index } })
+    )
+  )
+
+  revalidatePath('/planning')
+  return { success: true }
+}

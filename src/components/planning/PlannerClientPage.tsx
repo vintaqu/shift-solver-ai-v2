@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { createAssignment, updateAssignment, moveAssignment, deleteAssignment, toggleAssignmentLock, publishPlanningPeriod } from '@/server/actions/planning'
+import { updateEmployeeOrder } from '@/server/actions/employees'
 import { GenerateModal } from './GenerateModal'
 
 // ─── Paleta de colores por empleado ───────────────────────────────────────────
@@ -99,9 +100,17 @@ export function PlannerClientPage({ period, employees, weekDays, allPeriods, abs
   const [editor, setEditor] = useState<EditorState>({ open: false, mode: 'create' })
   const [showSummary, setShowSummary] = useState(false)
   const [showWeekPicker, setShowWeekPicker] = useState(false)
-  // ── Drag & Drop state ──
+  // ── Drag & Drop turnos ──
   const [draggedAssignment, setDraggedAssignment] = useState<{ id: string; empId: string; dayIdx: number } | null>(null)
   const [dragOverCell, setDragOverCell] = useState<{ empId: string; dayIdx: number } | null>(null)
+
+  // ── Reordenar empleados ──
+  const [employeeOrder, setEmployeeOrder] = useState<string[]>(() => [...employees].sort((a: any, b: any) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0)).map((e: any) => e.id))
+  const [draggedEmpId, setDraggedEmpId] = useState<string | null>(null)
+  const [dragOverEmpId, setDragOverEmpId] = useState<string | null>(null)
+  const sortedEmployees = employeeOrder
+    .map(id => employees.find((e: any) => e.id === id))
+    .filter(Boolean)
   const [showGenerate, setShowGenerate] = useState(false)
   const [publishing, setPublishing] = useState(false)
 
@@ -402,7 +411,7 @@ export function PlannerClientPage({ period, employees, weekDays, allPeriods, abs
           </div>
 
           {/* Filas empleados */}
-          {employees.map((emp: any) => {
+          {sortedEmployees.map((emp: any) => {
             const col = empColorMap[emp.id]
             const contract = emp.contracts?.[0]
             const weekH = empWeekHours(emp.id)

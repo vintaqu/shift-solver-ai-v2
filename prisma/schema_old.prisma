@@ -232,7 +232,6 @@ model Employee {
   // Marco legal aplicable
   legalFrameworkId     String?  // null = usa el de la organización
   skipLegalValidation  Boolean  @default(false)  // true = dueño/socio sin validación
-  displayOrder         Int      @default(0)       // orden en el cuadrante semanal
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
