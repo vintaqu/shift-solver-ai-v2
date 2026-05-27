@@ -585,25 +585,23 @@ export function PlannerClientPage({ period, employees, weekDays, allPeriods, abs
             )
           })}
 
-          {/* Fila totales — sticky bottom */}
-          <div className="flex border-t border-gray-300 bg-white sticky bottom-0 z-20">
-        <div className="w-[180px] min-w-[180px] px-4 py-3 font-bold text-[12px] text-gray-500 uppercase tracking-wider border-r border-gray-200 sticky left-0 bg-gray-50 z-10">
-          TOTALES
-        </div>
-        {weekDays.map((dayIso, i) => {
+          {/* Fila totales — sticky bottom, alineada con las columnas */}
+          <div className="flex border-t border-gray-300 bg-white sticky bottom-0 z-20" style={{ minWidth: 'max-content' }}>
+            <div className="w-[180px] min-w-[180px] px-4 py-3 font-bold text-[12px] text-gray-500 uppercase tracking-wider border-r border-gray-200 sticky left-0 bg-gray-50 z-10">
+              TOTALES
+            </div>
+            {weekDays.map((dayIso, i) => {
               const dayAssignments = employees.flatMap((e: any) =>
                 assignmentsByEmpDay[e.id]?.[i] || [])
               const totalBruto = dayAssignments.reduce((s: number, a: any) =>
                 s + durationBruto(a.startTime, a.endTime), 0)
-              const totalNeto = dayAssignments.reduce((s: number, a: any) =>
-                s + durationH(a.startTime, a.endTime, a.breakMinutes), 0)
               const totalBreak = dayAssignments.reduce((s: number, a: any) =>
                 s + (a.breakMinutes || 0), 0)
               const working = employees.filter((e: any) =>
                 (assignmentsByEmpDay[e.id]?.[i] || []).length > 0
               ).length
               return (
-                <div key={i} className="px-2 py-3 border-r border-gray-200 text-center">
+                <div key={i} className="flex-1 min-w-[120px] px-2 py-3 border-r border-gray-200 text-center">
                   <div className="text-[12px] font-bold text-gray-700">{working} 👤</div>
                   <div className="text-[11px] font-semibold text-gray-700">{fmtH(totalBruto)}</div>
                   {totalBreak > 0 && (
@@ -618,7 +616,7 @@ export function PlannerClientPage({ period, employees, weekDays, allPeriods, abs
               const totalNeto  = employees.reduce((acc: number, e: any) => acc + empWeekHours(e.id), 0)
               const totalBreak = employees.reduce((acc: number, e: any) => acc + empWeekBreakMin(e.id), 0)
               return (
-                <div className="px-2 py-3 text-center">
+                <div className="w-[88px] min-w-[88px] px-2 py-3 text-center bg-indigo-50">
                   <div className="text-[13px] font-bold text-indigo-600">{fmtH(totalBruto)}</div>
                   {totalBreak > 0 && (
                     <>
