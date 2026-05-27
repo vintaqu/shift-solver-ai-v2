@@ -424,11 +424,47 @@ export function PlannerClientPage({ period, employees, weekDays, allPeriods, abs
             return (
               <div
                 key={emp.id}
-                className="grid border-b border-gray-100 hover:bg-gray-50/50 transition-colors group"
+                className={cn(
+                  "grid border-b border-gray-100 hover:bg-gray-50/50 transition-colors group",
+                  draggedEmpId === emp.id && "opacity-40"
+                )}
                 style={{ gridTemplateColumns: '200px repeat(7, 1fr) 88px' }}
               >
-                {/* Nombre empleado */}
-                <div className="px-3 py-2 border-r border-gray-200 flex items-center gap-2.5">
+                {/* Nombre empleado — draggable para reordenar */}
+                <div
+                  className={cn(
+                    "px-3 py-2 border-r border-gray-200 flex items-center gap-2 cursor-grab active:cursor-grabbing transition-colors select-none",
+                    dragOverEmpId === emp.id && draggedEmpId !== emp.id && "bg-indigo-50 border-l-2 border-l-indigo-400"
+                  )}
+                  draggable
+                  onDragStart={e => { e.stopPropagation(); setDraggedEmpId(emp.id) }}
+                  onDragEnd={() => { setDraggedEmpId(null); setDragOverEmpId(null) }}
+                  onDragOver={e => { e.preventDefault(); if (draggedEmpId && draggedEmpId !== emp.id) setDragOverEmpId(emp.id) }}
+                  onDragLeave={() => setDragOverEmpId(null)}
+                  onDrop={e => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    if (!draggedEmpId || draggedEmpId === emp.id) return
+                    const from = draggedEmpId
+                    setDragOverEmpId(null)
+                    setDraggedEmpId(null)
+                    setEmployeeOrder(prev => {
+                      const arr = [...prev]
+                      const fromIdx = arr.indexOf(from)
+                      const toIdx = arr.indexOf(emp.id)
+                      arr.splice(fromIdx, 1)
+                      arr.splice(toIdx, 0, from)
+                      updateEmployeeOrder(arr).catch(() => {})
+                      return arr
+                    })
+                  }}
+                >
+                  {/* Handle de arrastre */}
+                  <svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor" className="text-gray-300 hover:text-gray-500 flex-shrink-0">
+                    <circle cx="2" cy="2" r="1.5"/><circle cx="8" cy="2" r="1.5"/>
+                    <circle cx="2" cy="8" r="1.5"/><circle cx="8" cy="8" r="1.5"/>
+                    <circle cx="2" cy="14" r="1.5"/><circle cx="8" cy="14" r="1.5"/>
+                  </svg>
                   <div
                     className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold flex-shrink-0 text-white shadow-sm"
                     style={{ backgroundColor: col.dot }}
