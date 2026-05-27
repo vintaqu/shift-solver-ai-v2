@@ -113,20 +113,12 @@ function Modal({ title, onClose, children, wide = false }: any) {
   )
 }
 
-function ModalFooter({ onClose, onSave, isPending, saveLabel = 'Guardar', disabled = false, onDelete }: any) {
+function ModalFooter({ onClose, onSave, isPending, saveLabel = 'Guardar', disabled = false }: any) {
   return (
     <div className="flex justify-between items-center pt-4 mt-4 border-t border-gray-100">
-      <div className="flex items-center gap-2">
-        <button onClick={onClose} className="px-4 py-2 rounded-xl text-[13px] text-gray-500 hover:bg-gray-100 transition-colors">
-          Cancelar
-        </button>
-        {onDelete && (
-          <button onClick={onDelete} disabled={isPending}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[13px] text-red-500 hover:bg-red-50 border border-red-200 transition-colors disabled:opacity-50">
-            <Trash2 size={13} /> Eliminar slot
-          </button>
-        )}
-      </div>
+      <button onClick={onClose} className="px-4 py-2 rounded-xl text-[13px] text-gray-500 hover:bg-gray-100 transition-colors">
+        Cancelar
+      </button>
       <button
         onClick={onSave}
         disabled={isPending || disabled}
@@ -869,6 +861,7 @@ function CopyDayModal({ locationId, organizationId, templateId, dayRanges, onClo
 // ─── Modal: Crear/Editar slot ─────────────────────────────────────────────────
 function SlotModal({ slot, defaultDay, defaultTime, locationId, organizationId, templateId, roles, skills, onClose, onSaved }: any) {
   const [isPending, startTransition] = useTransition()
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const [form, setForm] = useState({
     dayOfWeek: slot?.dayOfWeek ?? defaultDay,
     startTime: slot?.startTime ?? defaultTime,
@@ -967,14 +960,6 @@ function SlotModal({ slot, defaultDay, defaultTime, locationId, organizationId, 
         onClose={onClose}
         saveLabel={isEdit ? 'Guardar cambios' : 'Crear slot'}
         isPending={isPending}
-        onDelete={isEdit ? () => startTransition(async () => {
-          if (!confirm('¿Eliminar este slot de cobertura?')) return
-          try {
-            await deleteCoverageSlot(slot.id)
-            toast.success('Slot eliminado')
-            onSaved()
-          } catch (e: any) { toast.error(e.message) }
-        }) : undefined}
         onSave={() => startTransition(async () => {
           try {
             await upsertCoverageSlot({ id: slot?.id, locationId, organizationId, templateId, ...form, laborRoleId: form.laborRoleId || null, skillId: form.skillId || null })
