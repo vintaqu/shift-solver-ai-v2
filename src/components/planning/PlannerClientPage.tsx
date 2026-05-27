@@ -720,7 +720,19 @@ function ShiftPill({ assignment: a, color, onEdit, onDelete, onToggleLock, dragg
 
   return (
     <div
-      className="relative rounded-lg px-2 py-1.5 cursor-pointer select-none transition-all hover:shadow-md"
+      draggable={draggable && !a.isLocked}
+      onDragStart={(e) => {
+        e.stopPropagation()
+        if (onDragStart) onDragStart()
+      }}
+      onDragEnd={(e) => {
+        e.stopPropagation()
+        if (onDragEnd) onDragEnd()
+      }}
+      className={cn(
+        'relative rounded-lg px-2 py-1.5 select-none transition-all hover:shadow-md',
+        draggable && !a.isLocked ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
+      )}
       style={{
         backgroundColor: color.bg,
         borderLeft: `3px solid ${color.dot}`,
@@ -729,7 +741,7 @@ function ShiftPill({ assignment: a, color, onEdit, onDelete, onToggleLock, dragg
       }}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      onClick={onEdit}
+      onClick={(e) => { if (!e.defaultPrevented) onEdit() }}
     >
       {/* Indicadores */}
       <div className="flex items-center justify-between gap-1">
