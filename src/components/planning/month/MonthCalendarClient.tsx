@@ -190,16 +190,9 @@ export function MonthCalendarClient({ year, month, data, organizationId, locatio
   return (
     <div className="flex flex-col h-full" style={{ background: '#f5f6fa' }}>
 
-      {/* ══ TOPBAR ══════════════════════════════════════════════════════════ */}
-      <header className="flex-shrink-0 bg-white border-b border-gray-200 px-6 h-[56px] flex items-center justify-between shadow-sm">
+      {/* ══ SUBBAR PLANIFICADOR ══════════════════════════════════════════════ */}
+      <header className="flex-shrink-0 bg-white border-b border-gray-200 px-6 h-[52px] flex items-center justify-between">
         <div className="flex items-center gap-3">
-          {/* Logo */}
-          <div className="flex items-center gap-2 mr-2">
-            <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center">
-              <Sparkles size={14} className="text-white" />
-            </div>
-            <span className="font-semibold text-[15px] text-gray-900 tracking-tight">Shift Solver</span>
-          </div>
 
           {/* Tabs de temporalidad */}
           <div className="flex items-center bg-gray-100 rounded-xl p-1 border border-gray-200">
