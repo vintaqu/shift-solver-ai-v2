@@ -153,9 +153,17 @@ export async function moveAssignment(assignmentId: string, newEmployeeId: string
   const existing = await getAssignmentOrThrow(assignmentId)
   if (existing.isLocked) throw new Error('El turno está bloqueado.')
 
+  // Normalizar la fecha a medianoche UTC para evitar desfase de timezone
+  const normalizedDate = new Date(Date.UTC(
+    newDate.getFullYear(),
+    newDate.getMonth(),
+    newDate.getDate(),
+    0, 0, 0, 0
+  ))
+
   const updated = await prisma.scheduleAssignment.update({
     where: { id: assignmentId },
-    data: { employeeId: newEmployeeId, date: newDate, origin: 'EDITED' },
+    data: { employeeId: newEmployeeId, date: normalizedDate, origin: 'EDITED' },
   })
 
   revalidatePath(`/planning/week/${existing.planningPeriodId}`)

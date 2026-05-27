@@ -455,14 +455,19 @@ export function PlannerClientPage({ period, employees, weekDays, allPeriods, abs
                         e.preventDefault()
                         setDragOverCell(null)
                         if (!draggedAssignment) return
-                        if (draggedAssignment.empId === emp.id && draggedAssignment.dayIdx === dayIdx) return
-                        const targetDate = new Date(weekDays[dayIdx])
+                        const { id: assignmentId, empId: fromEmpId, dayIdx: fromDayIdx } = draggedAssignment
+                        if (fromEmpId === emp.id && fromDayIdx === dayIdx) return
+                        setDraggedAssignment(null)
+                        // parseISO evita el timezone shift que ocurre con new Date("2026-05-15")
+                        const targetDate = parseISO(weekDays[dayIdx])
                         startTransition(async () => {
                           try {
-                            await moveAssignment(draggedAssignment.id, emp.id, targetDate)
-                            setDraggedAssignment(null)
+                            await moveAssignment(assignmentId, emp.id, targetDate)
                             router.refresh()
-                          } catch (e: any) { toast.error(e.message) }
+                          } catch (e: any) {
+                            toast.error(e.message)
+                            router.refresh()
+                          }
                         })
                       }}
                     >
