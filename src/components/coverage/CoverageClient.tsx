@@ -160,7 +160,7 @@ const STATUS_CFG: Record<string, { label: string; cls: string }> = {
   active:             { label: 'Activa',      cls: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
   scheduled_active:   { label: 'Programada',  cls: 'bg-blue-100 text-blue-700 border-blue-200' },
   scheduled_upcoming: { label: 'Próxima',     cls: 'bg-amber-100 text-amber-700 border-amber-200' },
-  default:            { label: 'Por defecto', cls: 'bg-indigo-100 text-indigo-700 border-indigo-200' },
+  // 'default' removed — only active/inactive matters
   inactive:           { label: 'Inactiva',    cls: 'bg-gray-100 text-gray-500 border-gray-200' },
 }
 
@@ -230,7 +230,7 @@ function TemplateManagerModal({ templates, locationId, organizationId, onClose, 
   const [isPending, startTransition] = useTransition()
   const [view, setView] = useState<'list' | 'create' | 'activate'>('list')
   const [createForm, setCreateForm] = useState({
-    name: '', description: '', color: '#6366f1', isDefault: false,
+    name: '', description: '', color: '#6366f1',
     openingTime: '09:00', closingTime: '23:00',
   })
   const [activating, setActivating] = useState<any>(null)
@@ -272,16 +272,14 @@ function TemplateManagerModal({ templates, locationId, organizationId, onClose, 
                     <div key={t.id} className={cn(
                       'rounded-xl border-2 p-4 transition-all',
                       t.isActive ? 'border-emerald-300 bg-emerald-50/30' :
-                      t.isDefault ? 'border-indigo-200 bg-indigo-50/20' : 'border-gray-200 bg-white'
+                      'border-gray-200 bg-white'
                     )}>
                       <div className="flex items-start gap-3">
                         <div className="w-10 h-10 rounded-xl flex-shrink-0" style={{ backgroundColor: t.color }} />
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="text-[14px] font-bold text-gray-800">{t.name}</span>
-                            {t.isDefault && (
-                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700 border border-indigo-200">Por defecto</span>
-                            )}
+
                             <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded-full border', stCfg.cls)}>
                               ● {stCfg.label}
                             </span>
@@ -305,20 +303,18 @@ function TemplateManagerModal({ templates, locationId, organizationId, onClose, 
                               Activar
                             </button>
                           ) : (
-                            !t.isDefault && (
-                              <button
-                                onClick={() => startTransition(async () => {
-                                  try {
-                                    await deactivateTemplate(t.id)
-                                    toast.success('Plantilla desactivada')
-                                    onChanged()
-                                  } catch (e: any) { toast.error(e.message) }
-                                })}
-                                className="px-3 py-1.5 rounded-lg border border-red-200 text-red-600 text-[11px] font-semibold hover:bg-red-50 transition-colors"
-                              >
-                                Desactivar
-                              </button>
-                            )
+                            <button
+                              onClick={() => startTransition(async () => {
+                                try {
+                                  await deactivateTemplate(t.id)
+                                  toast.success('Plantilla desactivada')
+                                  onChanged()
+                                } catch (e: any) { toast.error(e.message) }
+                              })}
+                              className="px-3 py-1.5 rounded-lg border border-red-200 text-red-600 text-[11px] font-semibold hover:bg-red-50 transition-colors"
+                            >
+                              Desactivar
+                            </button>
                           )}
                           <button
                             onClick={() => {
@@ -337,7 +333,7 @@ function TemplateManagerModal({ templates, locationId, organizationId, onClose, 
                           >
                             <Copy size={14} />
                           </button>
-                          {!t.isDefault && !t.isActive && (
+                          {!t.isActive && (
                             <button
                               onClick={() => {
                                 if (!confirm(`¿Eliminar la plantilla "${t.name}"? Esta acción borrará también todos sus slots.`)) return
@@ -424,52 +420,7 @@ function TemplateManagerModal({ templates, locationId, organizationId, onClose, 
                 </div>
               </Field>
 
-              <div
-                className={cn('flex items-start gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition-all', createForm.isDefault ? 'border-indigo-300 bg-indigo-50' : 'border-gray-200 bg-white')}
-                onClick={() => setCreateForm(f => ({ ...f, isDefault: !f.isDefault }))}
-              >
-                <div className={cn('w-10 h-5 rounded-full transition-all relative flex-shrink-0 mt-0.5', createForm.isDefault ? 'bg-indigo-600' : 'bg-gray-200')}>
-                  <div className={cn('absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all', createForm.isDefault ? 'left-5' : 'left-0.5')} />
-                </div>
-                <div>
-                  <div className="text-[13px] font-medium text-gray-700">Marcar como plantilla por defecto</div>
-                  <div className="text-[11px] text-gray-400 mt-0.5">Se usa cuando ninguna otra está activa.</div>
-                </div>
-              </div>
-
-              <div className="flex justify-between items-center pt-2 border-t border-gray-100">
-                <button onClick={() => setView('list')} className="px-4 py-2 rounded-xl text-[13px] text-gray-500 hover:bg-gray-100 transition-colors">
-                  Cancelar
-                </button>
-                <button
-                  disabled={!createForm.name.trim() || isPending}
-                  onClick={() => startTransition(async () => {
-                    try {
-                      await createTemplate({ organizationId, locationId, ...createForm })
-                      toast.success('Plantilla creada ✓')
-                      onChanged()
-                    } catch (e: any) { toast.error(e.message) }
-                  })}
-                  className="flex items-center gap-2 px-5 py-2 rounded-xl bg-indigo-600 text-white text-[13px] font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-                >
-                  {isPending ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
-                  Crear plantilla
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* ── ACTIVAR PLANTILLA ── */}
-          {view === 'activate' && activating && (
-            <div className="space-y-4">
-              <button onClick={() => setView('list')} className="flex items-center gap-1.5 text-[12px] text-gray-500 hover:text-indigo-600 transition-colors mb-2">
-                ← Volver
-              </button>
-
-              <div className="flex items-center gap-3 p-4 rounded-xl border-2 border-emerald-200 bg-emerald-50">
-                <div className="w-10 h-10 rounded-xl flex-shrink-0" style={{ backgroundColor: activating.color }} />
-                <div>
-                  <div className="text-[14px] font-bold text-gray-800">{activating.name}</div>
+              
                   <div className="text-[11px] text-gray-500">{activating.slotsCount} slots configurados</div>
                 </div>
               </div>
