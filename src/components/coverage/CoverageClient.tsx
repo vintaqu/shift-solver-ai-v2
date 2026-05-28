@@ -15,7 +15,7 @@ import {
   copyDaySlots, loadCoverageTemplate, generateSlotsForDay
 } from '@/server/actions/coverage'
 import {
-  createTemplate, deleteTemplate,
+  createTemplate, updateTemplate, deleteTemplate,
   activateTemplate, deactivateTemplate, duplicateTemplate,
 } from '@/server/actions/coverageTemplates'
 import { evaluateTemplateStatus } from '@/lib/coverageTemplateUtils'
@@ -232,6 +232,8 @@ function TemplateManagerModal({ templates: initialTemplates, locationId, organiz
   const [view, setView] = useState<'list' | 'create' | 'activate'>('list')
   const [templates, setTemplates] = useState(initialTemplates)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  const [editingTemplate, setEditingTemplate] = useState<any | null>(null)
+  const [editForm, setEditForm] = useState({ name: '', description: '', color: '#6366f1', openingTime: '09:00', closingTime: '23:00' })
   const [createForm, setCreateForm] = useState({
     name: '', description: '', color: '#6366f1',
     openingTime: '09:00', closingTime: '23:00',
@@ -336,6 +338,22 @@ function TemplateManagerModal({ templates: initialTemplates, locationId, organiz
                           >
                             <Copy size={14} />
                           </button>
+                          <button
+                            onClick={() => {
+                              setEditingTemplate(t)
+                              setEditForm({
+                                name: t.name,
+                                description: t.description ?? '',
+                                color: t.color ?? '#6366f1',
+                                openingTime: t.openingTime ?? '09:00',
+                                closingTime: t.closingTime ?? '23:00',
+                              })
+                            }}
+                            className="p-1.5 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                            title="Editar"
+                          >
+                            <Pencil size={14} />
+                          </button>
                           {!t.isActive && (
                             <button
                               onClick={() => setConfirmDeleteId(t.id)}
@@ -388,6 +406,101 @@ function TemplateManagerModal({ templates: initialTemplates, locationId, organiz
               >
                 <Plus size={16} /> Nueva plantilla
               </button>
+            </div>
+          )}
+
+          {/* ── EDITAR PLANTILLA (modal inline) ── */}
+          {editingTemplate && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={() => setEditingTemplate(null)}>
+              <div className="absolute inset-0 bg-black/30 backdrop-blur-[2px]" />
+              <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-[440px] overflow-hidden" onClick={e => e.stopPropagation()}>
+                <div className="px-5 py-4 border-b border-gray-100" style={{ background: 'linear-gradient(135deg,#eef2ff,#f5f3ff)' }}>
+                  <h3 className="text-[14px] font-bold text-gray-900">Editar plantilla</h3>
+                  <p className="text-[11px] text-gray-500 mt-0.5">{editingTemplate.name}</p>
+                </div>
+                <div className="px-5 py-4 space-y-4">
+                  {/* Nombre */}
+                  <div>
+                    <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Nombre *</label>
+                    <input
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-[13px] bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                      value={editForm.name}
+                      onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))}
+                      placeholder="Nombre de la plantilla"
+                    />
+                  </div>
+                  {/* Descripción */}
+                  <div>
+                    <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Descripción</label>
+                    <input
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-[13px] bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                      value={editForm.description}
+                      onChange={e => setEditForm(f => ({ ...f, description: e.target.value }))}
+                      placeholder="Descripción opcional"
+                    />
+                  </div>
+                  {/* Color */}
+                  <div>
+                    <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Color</label>
+                    <div className="flex gap-2 flex-wrap">
+                      {['#6366f1','#10b981','#f59e0b','#ef4444','#8b5cf6','#0891b2','#ec4899','#64748b','#84cc16'].map(c => (
+                        <button key={c} onClick={() => setEditForm(f => ({ ...f, color: c }))}
+                          className={cn('w-7 h-7 rounded-lg transition-all', editForm.color === c ? 'ring-2 ring-offset-1 ring-gray-500 scale-110' : 'hover:scale-110')}
+                          style={{ backgroundColor: c }} />
+                      ))}
+                    </div>
+                  </div>
+                  {/* Horario */}
+                  <div>
+                    <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Horario de operación</label>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <div className="text-[10px] text-gray-400 mb-1">Apertura</div>
+                        <input type="time" value={editForm.openingTime}
+                          onChange={e => setEditForm(f => ({ ...f, openingTime: e.target.value }))}
+                          className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-[13px] bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+                      </div>
+                      <div>
+                        <div className="text-[10px] text-gray-400 mb-1">Cierre</div>
+                        <input type="time" value={editForm.closingTime}
+                          onChange={e => setEditForm(f => ({ ...f, closingTime: e.target.value }))}
+                          className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-[13px] bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex justify-between px-5 py-4 border-t border-gray-100 bg-gray-50/50">
+                  <button onClick={() => setEditingTemplate(null)} className="px-4 py-2 rounded-xl text-[13px] text-gray-500 hover:bg-gray-100">
+                    Cancelar
+                  </button>
+                  <button
+                    disabled={isPending || !editForm.name.trim()}
+                    onClick={() => startTransition(async () => {
+                      try {
+                        await updateTemplate(editingTemplate.id, {
+                          name: editForm.name.trim(),
+                          description: editForm.description.trim() || undefined,
+                          color: editForm.color,
+                          openingTime: editForm.openingTime,
+                          closingTime: editForm.closingTime,
+                        })
+                        toast.success('Plantilla actualizada ✓')
+                        setTemplates((prev: any[]) => prev.map((t: any) =>
+                          t.id === editingTemplate.id
+                            ? { ...t, name: editForm.name.trim(), description: editForm.description, color: editForm.color, openingTime: editForm.openingTime, closingTime: editForm.closingTime }
+                            : t
+                        ))
+                        setEditingTemplate(null)
+                        router.refresh()
+                      } catch (e: any) { toast.error(e.message) }
+                    })}
+                    className="flex items-center gap-2 px-5 py-2 rounded-xl bg-indigo-600 text-white text-[13px] font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                  >
+                    {isPending ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
+                    Guardar cambios
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
