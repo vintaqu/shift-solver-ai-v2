@@ -347,6 +347,36 @@ function TemplateManagerModal({ templates: initialTemplates, locationId, organiz
                           )}
                         </div>
                       </div>
+
+                      {/* Inline confirm delete */}
+                      {confirmDeleteId === t.id && (
+                        <div className="mx-4 mb-3 flex items-center gap-2 p-2.5 bg-red-50 border border-red-200 rounded-xl">
+                          <span className="text-[12px] text-red-700 font-medium flex-1">
+                            ¿Eliminar &quot;{t.name}&quot; y sus {t.slotsCount} slots?
+                          </span>
+                          <button
+                            disabled={isPending}
+                            onClick={() => startTransition(async () => {
+                              try {
+                                await deleteTemplate(t.id)
+                                toast.success('Plantilla eliminada')
+                                setTemplates((prev: any[]) => prev.filter((x: any) => x.id !== t.id))
+                                setConfirmDeleteId(null)
+                                router.refresh()
+                              } catch (e: any) { toast.error(e.message) }
+                            })}
+                            className="px-3 py-1 rounded-lg bg-red-600 text-white text-[11px] font-semibold hover:bg-red-700 disabled:opacity-50 transition-colors"
+                          >
+                            {isPending ? '...' : 'Sí, eliminar'}
+                          </button>
+                          <button
+                            onClick={() => setConfirmDeleteId(null)}
+                            className="px-3 py-1 rounded-lg bg-white border border-gray-200 text-[11px] text-gray-600 hover:bg-gray-50 transition-colors"
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )
                 })}
