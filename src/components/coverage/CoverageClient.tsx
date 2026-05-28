@@ -226,9 +226,12 @@ function TemplateSidebar({ templates, selectedTemplateId, onSwitch, onManage, on
 }
 
 // ─── Template Manager Modal ───────────────────────────────────────────────────
-function TemplateManagerModal({ templates, locationId, organizationId, onClose, onChanged }: any) {
+function TemplateManagerModal({ templates: initialTemplates, locationId, organizationId, onClose, onChanged }: any) {
+  const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [view, setView] = useState<'list' | 'create' | 'activate'>('list')
+  const [templates, setTemplates] = useState(initialTemplates)
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [createForm, setCreateForm] = useState({
     name: '', description: '', color: '#6366f1',
     openingTime: '09:00', closingTime: '23:00',
@@ -335,16 +338,7 @@ function TemplateManagerModal({ templates, locationId, organizationId, onClose, 
                           </button>
                           {!t.isActive && (
                             <button
-                              onClick={() => {
-                                if (!confirm(`¿Eliminar la plantilla "${t.name}"? Esta acción borrará también todos sus slots.`)) return
-                                startTransition(async () => {
-                                  try {
-                                    await deleteTemplate(t.id)
-                                    toast.success('Plantilla eliminada')
-                                    onChanged()
-                                  } catch (e: any) { toast.error(e.message) }
-                                })
-                              }}
+                              onClick={() => setConfirmDeleteId(t.id)}
                               className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
                               title="Eliminar"
                             >
