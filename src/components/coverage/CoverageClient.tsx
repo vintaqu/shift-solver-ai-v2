@@ -165,46 +165,62 @@ const STATUS_CFG: Record<string, { label: string; cls: string }> = {
 }
 
 // ─── Template Bar ─────────────────────────────────────────────────────────────
-function TemplateBar({ templates, selectedTemplateId, onManage, onSwitch }: any) {
-  const active = templates.find((t: any) => t.isActive) ?? templates.find((t: any) => t.isDefault)
+function TemplateSidebar({ templates, selectedTemplateId, onSwitch, onManage, onNewTemplate }: any) {
   return (
-    <div className="flex-shrink-0 bg-white border-b border-gray-200 px-6 py-2.5 flex items-center gap-3">
-      <div className="flex items-center gap-2 text-[12px]">
-        <span className="text-gray-400 font-medium">Plantilla activa:</span>
-        {active ? (
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: active.color }} />
-            <span className="font-bold text-gray-800">{active.name}</span>
-            <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded-full border', STATUS_CFG[active.computedStatus]?.cls)}>
-              {STATUS_CFG[active.computedStatus]?.label}
-            </span>
-          </div>
-        ) : <span className="text-gray-400 italic">Ninguna</span>}
+    <div className="w-[220px] min-w-[220px] flex flex-col bg-white border-r border-gray-200 overflow-hidden h-full">
+      {/* Header */}
+      <div className="px-4 pt-4 pb-3 border-b border-gray-100">
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="text-[13px] font-bold text-gray-900">Plantillas</h2>
+          <span className="text-[10px] text-gray-400">{templates.length} total</span>
+        </div>
+        <p className="text-[11px] text-gray-400">Selecciona una para editar sus slots</p>
       </div>
-      <div className="h-4 w-px bg-gray-200" />
-      <div className="flex items-center gap-1.5 overflow-x-auto">
-        <span className="text-[11px] text-gray-400 whitespace-nowrap">Editar:</span>
-        {templates.map((t: any) => (
-          <button
-            key={t.id}
-            onClick={() => onSwitch(t.id)}
-            className={cn(
-              'flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold whitespace-nowrap border transition-all',
-              selectedTemplateId === t.id ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'
-            )}
-          >
-            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: t.color }} />
-            {t.name}
-            <span className="text-[9px] opacity-60">({t.slotsCount})</span>
-          </button>
-        ))}
+
+      {/* Lista de plantillas */}
+      <div className="flex-1 overflow-y-auto py-1">
+        {templates.map((t: any) => {
+          const isSelected = t.id === selectedTemplateId
+          const cfg = STATUS_CFG[t.computedStatus] ?? STATUS_CFG.inactive
+          return (
+            <button
+              key={t.id}
+              onClick={() => onSwitch(t.id)}
+              className={cn(
+                'w-full flex items-start gap-2.5 px-3 py-2.5 text-left transition-colors border-l-2',
+                isSelected
+                  ? 'bg-indigo-50 border-l-indigo-600'
+                  : 'border-l-transparent hover:bg-gray-50'
+              )}
+            >
+              {/* Color dot */}
+              <div className="w-2.5 h-2.5 rounded-full mt-1 flex-shrink-0" style={{ backgroundColor: t.color }} />
+
+              <div className="flex-1 min-w-0">
+                <div className={cn('text-[12px] font-semibold truncate', isSelected ? 'text-indigo-700' : 'text-gray-800')}>
+                  {t.name}
+                </div>
+                <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                  <span className={cn('text-[9px] font-bold px-1.5 py-0.5 rounded-full border', cfg.cls)}>
+                    {cfg.label}
+                  </span>
+                  <span className="text-[10px] text-gray-400">{t.slotsCount} slots</span>
+                </div>
+              </div>
+            </button>
+          )
+        })}
       </div>
-      <button
-        onClick={onManage}
-        className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 text-white text-[12px] font-semibold hover:bg-indigo-700 transition-colors whitespace-nowrap"
-      >
-        <Settings size={13} /> Gestionar plantillas
-      </button>
+
+      {/* Footer acciones */}
+      <div className="border-t border-gray-100 p-3 space-y-2">
+        <button
+          onClick={onManage}
+          className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-600 text-white text-[12px] font-semibold hover:bg-indigo-700 transition-colors"
+        >
+          <Settings size={12} /> Gestionar plantillas
+        </button>
+      </div>
     </div>
   )
 }
@@ -1242,14 +1258,18 @@ export function CoverageClient({ templates, initialTemplateId, initialSlots, rol
   const hasSlots = initialSlots.length > 0
 
   return (
-    <div className="flex flex-col h-full" style={{ background: '#f5f6fa' }}>
+    <div className="flex h-[calc(100vh-52px)] overflow-hidden bg-[#F7F8FA]">
 
-      <TemplateBar
+      {/* ── Sidebar plantillas ── */}
+      <TemplateSidebar
         templates={templates}
         selectedTemplateId={selectedTemplateId}
-        onManage={() => setShowTemplateManager(true)}
         onSwitch={handleTemplateChange}
+        onManage={() => setShowTemplateManager(true)}
       />
+
+      {/* ── Panel derecho ── */}
+      <div className="flex-1 flex flex-col overflow-hidden">
 
       {/* ── Header ── */}
       <div className="flex-shrink-0 bg-white border-b border-gray-200 px-6 py-4">
@@ -1324,7 +1344,7 @@ export function CoverageClient({ templates, initialTemplateId, initialSlots, rol
       </div>
 
       {/* ── Contenido ── */}
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-auto" style={{ background: '#F7F8FA' }}>
         {!hasSlots ? (
           <EmptyState onLoadTemplate={() => setShowTemplates(true)} onGenerate={() => setShowGenerate(true)} />
         ) : viewMode === 'matrix' ? (
@@ -1335,6 +1355,8 @@ export function CoverageClient({ templates, initialTemplateId, initialSlots, rol
           }} />
         )}
       </div>
+
+      </div>{/* fin panel derecho */}
 
       {/* ── Modales ── */}
       {showTemplateManager && (
