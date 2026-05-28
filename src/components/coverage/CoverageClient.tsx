@@ -233,7 +233,13 @@ function TemplateManagerModal({ templates: initialTemplates, locationId, organiz
   const [templates, setTemplates] = useState(initialTemplates)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [editingTemplate, setEditingTemplate] = useState<any | null>(null)
-  const [editForm, setEditForm] = useState({ name: '', description: '', color: '#6366f1', openingTime: '09:00', closingTime: '23:00' })
+  const [editForm, setEditForm] = useState({
+    name: '', description: '', color: '#6366f1',
+    openingTime: '09:00', closingTime: '23:00',
+    activationType: 'MANUAL' as 'MANUAL' | 'SCHEDULED',
+    schedStartMonth: 6, schedStartDay: 1,
+    schedEndMonth: 9, schedEndDay: 30,
+  })
   const [createForm, setCreateForm] = useState({
     name: '', description: '', color: '#6366f1',
     openingTime: '09:00', closingTime: '23:00',
@@ -347,6 +353,11 @@ function TemplateManagerModal({ templates: initialTemplates, locationId, organiz
                                 color: t.color ?? '#6366f1',
                                 openingTime: t.openingTime ?? '09:00',
                                 closingTime: t.closingTime ?? '23:00',
+                                activationType: (t.activationType as 'MANUAL' | 'SCHEDULED') ?? 'MANUAL',
+                                schedStartMonth: t.schedStartMonth ?? 6,
+                                schedStartDay: t.schedStartDay ?? 1,
+                                schedEndMonth: t.schedEndMonth ?? 9,
+                                schedEndDay: t.schedEndDay ?? 30,
                               })
                             }}
                             className="p-1.5 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
@@ -469,6 +480,73 @@ function TemplateManagerModal({ templates: initialTemplates, locationId, organiz
                     </div>
                   </div>
                 </div>
+                  {/* Tipo de activación */}
+                  <div>
+                    <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Tipo de activación</label>
+                    <div className="space-y-2">
+                      {[
+                        { value: 'MANUAL', title: 'Activación manual', desc: 'Activa o desactiva manualmente cuando quieras.' },
+                        { value: 'SCHEDULED', title: 'Programada por fechas', desc: 'Se activa automáticamente en un rango de fechas anual.' },
+                      ].map(opt => (
+                        <label key={opt.value}
+                          className={cn('flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all',
+                            editForm.activationType === opt.value ? 'border-emerald-400 bg-emerald-50' : 'border-gray-200 hover:border-gray-300')}
+                          onClick={() => setEditForm(f => ({ ...f, activationType: opt.value as any }))}>
+                          <div className={cn('w-4 h-4 rounded-full border-2 flex-shrink-0 mt-0.5 flex items-center justify-center',
+                            editForm.activationType === opt.value ? 'border-emerald-500 bg-emerald-500' : 'border-gray-300')}>
+                            {editForm.activationType === opt.value && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                          </div>
+                          <div>
+                            <div className="text-[13px] font-semibold text-gray-800">{opt.title}</div>
+                            <div className="text-[11px] text-gray-500 mt-0.5">{opt.desc}</div>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Rango fechas si es SCHEDULED */}
+                  {editForm.activationType === 'SCHEDULED' && (
+                    <div>
+                      <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Rango de fechas anual</label>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <div className="text-[10px] text-gray-400 mb-1">Mes inicio</div>
+                          <select value={editForm.schedStartMonth}
+                            onChange={e => setEditForm(f => ({ ...f, schedStartMonth: +e.target.value }))}
+                            className="w-full border border-gray-200 rounded-xl px-3 py-2 text-[13px] bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-300">
+                            {['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'].map((m, i) => (
+                              <option key={i} value={i+1}>{m}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <div className="text-[10px] text-gray-400 mb-1">Día inicio</div>
+                          <input type="number" min={1} max={31} value={editForm.schedStartDay}
+                            onChange={e => setEditForm(f => ({ ...f, schedStartDay: +e.target.value }))}
+                            className="w-full border border-gray-200 rounded-xl px-3 py-2 text-[13px] bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+                        </div>
+                        <div>
+                          <div className="text-[10px] text-gray-400 mb-1">Mes fin</div>
+                          <select value={editForm.schedEndMonth}
+                            onChange={e => setEditForm(f => ({ ...f, schedEndMonth: +e.target.value }))}
+                            className="w-full border border-gray-200 rounded-xl px-3 py-2 text-[13px] bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-300">
+                            {['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'].map((m, i) => (
+                              <option key={i} value={i+1}>{m}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <div className="text-[10px] text-gray-400 mb-1">Día fin</div>
+                          <input type="number" min={1} max={31} value={editForm.schedEndDay}
+                            onChange={e => setEditForm(f => ({ ...f, schedEndDay: +e.target.value }))}
+                            className="w-full border border-gray-200 rounded-xl px-3 py-2 text-[13px] bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>{/* end scrollable content */}
+
                 <div className="flex justify-between px-5 py-4 border-t border-gray-100 bg-gray-50/50">
                   <button onClick={() => setEditingTemplate(null)} className="px-4 py-2 rounded-xl text-[13px] text-gray-500 hover:bg-gray-100">
                     Cancelar
@@ -483,11 +561,20 @@ function TemplateManagerModal({ templates: initialTemplates, locationId, organiz
                           color: editForm.color,
                           openingTime: editForm.openingTime,
                           closingTime: editForm.closingTime,
+                          activationType: editForm.activationType,
+                          schedStartMonth: editForm.activationType === 'SCHEDULED' ? editForm.schedStartMonth : undefined,
+                          schedStartDay: editForm.activationType === 'SCHEDULED' ? editForm.schedStartDay : undefined,
+                          schedEndMonth: editForm.activationType === 'SCHEDULED' ? editForm.schedEndMonth : undefined,
+                          schedEndDay: editForm.activationType === 'SCHEDULED' ? editForm.schedEndDay : undefined,
                         })
                         toast.success('Plantilla actualizada ✓')
                         setTemplates((prev: any[]) => prev.map((t: any) =>
                           t.id === editingTemplate.id
-                            ? { ...t, name: editForm.name.trim(), description: editForm.description, color: editForm.color, openingTime: editForm.openingTime, closingTime: editForm.closingTime }
+                            ? { ...t, name: editForm.name.trim(), description: editForm.description, color: editForm.color,
+                                openingTime: editForm.openingTime, closingTime: editForm.closingTime,
+                                activationType: editForm.activationType,
+                                schedStartMonth: editForm.schedStartMonth, schedStartDay: editForm.schedStartDay,
+                                schedEndMonth: editForm.schedEndMonth, schedEndDay: editForm.schedEndDay }
                             : t
                         ))
                         setEditingTemplate(null)

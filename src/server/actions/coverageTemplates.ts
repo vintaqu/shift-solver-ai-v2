@@ -74,16 +74,14 @@ export async function updateTemplate(id: string, data: {
   color?: string
   openingTime?: string
   closingTime?: string
-  isDefault?: boolean
+  activationType?: string
+  schedStartMonth?: number
+  schedStartDay?: number
+  schedEndMonth?: number
+  schedEndDay?: number
 }) {
-  if (data.isDefault) {
-    const template = await prisma.coverageTemplate.findUnique({ where: { id } })
-    if (template) {
-      await prisma.coverageTemplate.updateMany({
-        where: { locationId: template.locationId, id: { not: id } },
-        data: { isDefault: false },
-      })
-    }
+  if (false) {
+    // isDefault removed
   }
 
   const updated = await prisma.coverageTemplate.update({
