@@ -429,7 +429,7 @@ function TemplateManagerModal({ templates: initialTemplates, locationId, organiz
                   <h3 className="text-[14px] font-bold text-gray-900">Editar plantilla</h3>
                   <p className="text-[11px] text-gray-500 mt-0.5">{editingTemplate.name}</p>
                 </div>
-                <div className="px-5 py-4 space-y-4">
+                <div className="px-5 py-4 space-y-4 overflow-y-auto max-h-[60vh]">
                   {/* Nombre */}
                   <div>
                     <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Nombre *</label>
@@ -545,7 +545,6 @@ function TemplateManagerModal({ templates: initialTemplates, locationId, organiz
                       </div>
                     </div>
                   )}
-                </div>{/* end scrollable content */}
 
                 <div className="flex justify-between px-5 py-4 border-t border-gray-100 bg-gray-50/50">
                   <button onClick={() => setEditingTemplate(null)} className="px-4 py-2 rounded-xl text-[13px] text-gray-500 hover:bg-gray-100">
