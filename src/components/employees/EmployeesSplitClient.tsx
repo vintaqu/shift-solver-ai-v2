@@ -9,7 +9,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { EmployeeDetailClient } from './EmployeeDetailClient'
-import { createEmployee } from '@/server/actions/employees'
+import { upsertEmployee } from '@/server/actions/employees'
 
 const ROLE_COLORS: Record<string, string> = {
   OWNER:        'bg-gray-800 text-white',
@@ -214,8 +214,6 @@ export function EmployeesSplitClient({ employees: initial, skills, roles, legalF
       {/* Modal crear empleado */}
       {showCreate && (
         <CreateEmployeeModal
-          roles={roles}
-          skills={skills}
           organizationId={organizationId}
           onClose={() => setShowCreate(false)}
           onCreated={(emp: any) => {
@@ -231,12 +229,11 @@ export function EmployeesSplitClient({ employees: initial, skills, roles, legalF
 }
 
 // ── Modal crear empleado ──────────────────────────────────────────────────────
-function CreateEmployeeModal({ roles, organizationId, onClose, onCreated }: any) {
+function CreateEmployeeModal({ organizationId, onClose, onCreated }: any) {
   const [isPending, startTransition] = useTransition()
   const [form, setForm] = useState({
     firstName: '', lastName: '', email: '', phone: '',
-    color: '#6366f1', roleId: '',
-    contractType: 'FULL_TIME', weeklyHours: 40,
+    color: '#6366f1',
   })
   const [errors, setErrors] = useState<Record<string, string>>({})
 
@@ -246,7 +243,6 @@ function CreateEmployeeModal({ roles, organizationId, onClose, onCreated }: any)
     const e: Record<string, string> = {}
     if (!form.firstName.trim()) e.firstName = 'Nombre obligatorio'
     if (!form.lastName.trim()) e.lastName = 'Apellido obligatorio'
-    if (!form.roleId) e.roleId = 'Selecciona un rol'
     return e
   }
 
@@ -256,6 +252,7 @@ function CreateEmployeeModal({ roles, organizationId, onClose, onCreated }: any)
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-[480px] overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="px-6 py-4 border-b border-gray-100" style={{ background: 'linear-gradient(135deg,#eef2ff,#f5f3ff)' }}>
           <h2 className="text-[15px] font-bold text-gray-900">Nuevo empleado</h2>
+          <p className="text-[11px] text-gray-400 mt-0.5">Rellena los datos básicos. Podrás configurar contrato y roles desde la ficha.</p>
         </div>
 
         <div className="px-6 py-5 space-y-4 max-h-[70vh] overflow-y-auto">
@@ -296,43 +293,6 @@ function CreateEmployeeModal({ roles, organizationId, onClose, onCreated }: any)
             ))}
           </div>
 
-          {/* Rol */}
-          <div>
-            <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Rol *</label>
-            <div className="flex flex-wrap gap-2">
-              {roles.map((r: any) => (
-                <button key={r.id} onClick={() => setForm(f => ({ ...f, roleId: r.id }))}
-                  className={cn('px-3 py-1.5 rounded-xl text-[12px] font-medium border-2 transition-all',
-                    form.roleId === r.id ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-gray-200 text-gray-600 hover:border-gray-300')}>
-                  {r.name}
-                </button>
-              ))}
-            </div>
-            {errors.roleId && <p className="text-[10px] text-red-500 mt-1">{errors.roleId}</p>}
-          </div>
-
-          {/* Contrato */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Tipo contrato</label>
-              <select
-                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-[13px] bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-300"
-                value={form.contractType}
-                onChange={e => setForm(f => ({ ...f, contractType: e.target.value }))}>
-                <option value="FULL_TIME">Tiempo completo</option>
-                <option value="PART_TIME">Tiempo parcial</option>
-                <option value="TEMPORARY">Temporal</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Horas/semana</label>
-              <input type="number" min={1} max={60}
-                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-[13px] bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-300"
-                value={form.weeklyHours}
-                onChange={e => setForm(f => ({ ...f, weeklyHours: +e.target.value }))} />
-            </div>
-          </div>
-
           {/* Color */}
           <div>
             <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Color en el cuadrante</label>
@@ -355,16 +315,13 @@ function CreateEmployeeModal({ roles, organizationId, onClose, onCreated }: any)
               if (Object.keys(e).length) { setErrors(e); return }
               startTransition(async () => {
                 try {
-                  const emp = await createEmployee({
+                  const emp = await upsertEmployee({
                     organizationId,
                     firstName: form.firstName.trim(),
                     lastName: form.lastName.trim(),
                     email: form.email.trim() || undefined,
                     phone: form.phone.trim() || undefined,
                     color: form.color,
-                    roleId: form.roleId,
-                    contractType: form.contractType,
-                    weeklyHours: form.weeklyHours,
                   })
                   onCreated(emp)
                 } catch (err: any) { toast.error(err.message) }
