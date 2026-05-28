@@ -61,7 +61,7 @@ function Field({ label, hint, error, children }: any) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-export function EmployeeDetailClient({ employee: emp, skills: allSkills, roles: allRoles, legalFrameworks = [] }: any) {
+export function EmployeeDetailClient({ employee: emp, skills: allSkills, roles: allRoles, legalFrameworks = [], onUpdated }: any) {
   const router = useRouter()
   const [tab, setTab] = useState<'info' | 'contract' | 'roles' | 'restrictions' | 'history'>('info')
   const [editInfo, setEditInfo] = useState(false)
@@ -89,17 +89,10 @@ export function EmployeeDetailClient({ employee: emp, skills: allSkills, roles: 
   ]
 
   return (
-    <div className="flex flex-col h-full" style={{ background: '#f5f6fa' }}>
+    <div className="flex flex-col h-full bg-[#F7F8FA]">
 
       {/* ── Header ── */}
       <div className="flex-shrink-0 bg-white border-b border-gray-200 px-6 py-4">
-        <button
-          onClick={() => router.push('/employees')}
-          className="flex items-center gap-1.5 text-[12px] text-gray-400 hover:text-indigo-600 transition-colors mb-3"
-        >
-          <ArrowLeft size={13} /> Volver a empleados
-        </button>
-
         <div className="flex items-center gap-4">
           {/* Avatar */}
           <div
