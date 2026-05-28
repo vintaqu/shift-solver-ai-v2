@@ -420,11 +420,6 @@ function TemplateManagerModal({ templates, locationId, organizationId, onClose, 
                 </div>
               </Field>
 
-              
-                  <div className="text-[11px] text-gray-500">{activating.slotsCount} slots configurados</div>
-                </div>
-              </div>
-
               <Field label="Tipo de activación">
                 <div className="space-y-2">
                   {[
