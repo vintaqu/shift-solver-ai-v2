@@ -80,9 +80,6 @@ export async function updateTemplate(id: string, data: {
   schedEndMonth?: number
   schedEndDay?: number
 }) {
-  if (false) {
-    // isDefault removed
-  }
 
   const updated = await prisma.coverageTemplate.update({
     where: { id },
@@ -90,7 +87,6 @@ export async function updateTemplate(id: string, data: {
       ...(data.name !== undefined && { name: data.name }),
       ...(data.description !== undefined && { description: data.description || null }),
       ...(data.color !== undefined && { color: data.color }),
-      ...(data.isDefault !== undefined && { isDefault: data.isDefault }),
     },
   })
 
