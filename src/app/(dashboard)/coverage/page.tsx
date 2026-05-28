@@ -5,7 +5,7 @@ import { requireOrgContext } from '@/lib/session'
 import { CoverageClient } from '@/components/coverage/CoverageClient'
 import { migrateLegacySlotsToDefault, getTemplatesForLocation } from '@/server/actions/coverageTemplates'
 
-export default async function CoveragePage() {
+export default async function CoveragePage({ searchParams }: { searchParams: { template?: string } }) {
   const ctx = await requireOrgContext()
   const { organizationId, locationId } = ctx
 
@@ -23,8 +23,14 @@ export default async function CoveragePage() {
     }),
   ])
 
-  // Determinar plantilla actualmente seleccionada (activa o default)
-  const activeTemplate = templates.find(t => t.isActive) ?? templates.find(t => t.isDefault) ?? templates[0]
+  // Determinar plantilla seleccionada — query param > activa > default > primera
+  const requestedTemplate = searchParams.template
+    ? templates.find(t => t.id === searchParams.template)
+    : null
+  const activeTemplate = requestedTemplate
+    ?? templates.find(t => t.isActive)
+    ?? templates.find(t => t.isDefault)
+    ?? templates[0]
 
   // Cargar slots de la plantilla activa
   const slots = activeTemplate ? await prisma.coverageRequirement.findMany({

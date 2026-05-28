@@ -1176,9 +1176,9 @@ export function CoverageClient({ templates, initialTemplateId, initialSlots, rol
 
   const activeTemplate = templates.find(t => t.id === selectedTemplateId)
 
-  async function handleTemplateChange(templateId: string) {
+  function handleTemplateChange(templateId: string) {
     setSelectedTemplateId(templateId)
-    router.refresh()
+    router.push(`/coverage?template=${templateId}`)
   }
 
   const slotMap = useMemo(() => {
