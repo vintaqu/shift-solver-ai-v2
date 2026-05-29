@@ -1276,16 +1276,23 @@ function MatrixView({ slotMap, visibleTimes, selectedDay, onEditSlot, onAddSlot 
                       style={{ backgroundColor: slot ? colors.bg : undefined }}
                       onClick={() => slot ? onEditSlot(slot) : onAddSlot(d, time)}>
                       {slot ? (
-                        <div className="rounded-lg px-2 py-1.5 h-[40px] flex flex-col justify-between relative group/cell border"
+                        <div className="rounded-lg px-2 py-1.5 min-h-[40px] flex flex-col justify-between relative group/cell border"
                           style={{ backgroundColor: colors.bg, borderColor: colors.border }}>
                           <div className="absolute left-0 top-0 bottom-0 w-1 rounded-l-lg" style={{ backgroundColor: colors.bar }} />
-                          <div className="pl-1 flex items-center justify-between">
-                            <span className="text-[14px] font-bold" style={{ color: colors.text }}>{slot.minWorkers}</span>
-                            {slot.idealWorkers > slot.minWorkers && <span className="text-[10px] font-medium opacity-60" style={{ color: colors.text }}>/{slot.idealWorkers}</span>}
+                          <div className="pl-1.5 flex items-center justify-between gap-1">
+                            <span className="text-[15px] font-bold leading-none" style={{ color: colors.text }}>{slot.minWorkers}</span>
+                            {slot.idealWorkers > slot.minWorkers && (
+                              <span className="text-[12px] font-semibold" style={{ color: colors.text, opacity: 0.7 }}>/{slot.idealWorkers}</span>
+                            )}
                           </div>
-                          {slot.laborRole && (
-                            <div className="pl-1">
-                              <span className="text-[8px] font-semibold px-1 rounded text-white" style={{ backgroundColor: slot.laborRole.color }}>{slot.laborRole.name.split(' ')[0]}</span>
+                          {(slot.laborRole || slot.notes) && (
+                            <div className="pl-1.5 mt-0.5 flex items-center gap-1 flex-wrap">
+                              {slot.laborRole && (
+                                <span className="text-[8px] font-semibold px-1 rounded text-white leading-tight" style={{ backgroundColor: slot.laborRole.color }}>{slot.laborRole.name.split(' ')[0]}</span>
+                              )}
+                              {slot.notes && (
+                                <span className="text-[8px] text-gray-500 truncate max-w-[60px]" title={slot.notes}>📝</span>
+                              )}
                             </div>
                           )}
                           <button className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-indigo-500 text-white opacity-0 group-hover/cell:opacity-100 transition-opacity flex items-center justify-center shadow-sm z-10"
