@@ -430,10 +430,8 @@ model CoverageTemplate {
   // MANUAL: fecha de fin opcional (null = indefinido)
   activeUntil      DateTime?
   // SCHEDULED: rango anual recurrente (día/mes)
-  schedStartMonth  Int?     // 1-12
-  schedStartDay    Int?     // 1-31
-  schedEndMonth    Int?     // 1-12
-  schedEndDay      Int?     // 1-31
+  scheduledFrom    DateTime?  // fecha inicio activación
+  scheduledTo      DateTime?  // fecha fin activación
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
