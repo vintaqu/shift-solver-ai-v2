@@ -11,7 +11,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
-  upsertCoverageSlot, deleteCoverageSlot,
+  upsertCoverageSlot, deleteCoverageSlot, clearAllSlots,
   copyDaySlots, loadCoverageTemplate, generateSlotsForDay
 } from '@/server/actions/coverage'
 import {
