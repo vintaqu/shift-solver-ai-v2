@@ -12,7 +12,7 @@ import {
 import { cn } from '@/lib/utils'
 import {
   upsertCoverageSlot, deleteCoverageSlot, clearAllSlots,
-  copyDaySlots, loadCoverageTemplate, generateSlotsForDay
+  copyDaySlots, loadCoverageTemplate, generateSlotsForDay, copySlotsBetweenTemplates
 } from '@/server/actions/coverage'
 import {
   createTemplate, updateTemplate, deleteTemplate,
@@ -232,6 +232,7 @@ function TemplateManagerModal({ templates: initialTemplates, locationId, organiz
   const [templates, setTemplates] = useState(initialTemplates)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [editingTemplate, setEditingTemplate] = useState<any | null>(null)
+  const [copyingToId, setCopyingToId] = useState<string | null>(null)
   const [editForm, setEditForm] = useState({
     name: '', description: '', color: '#6366f1',
     openingTime: '09:00', closingTime: '23:00',
@@ -346,6 +347,18 @@ function TemplateManagerModal({ templates: initialTemplates, locationId, organiz
                           >
                             <Copy size={14} />
                           </button>
+                          {!t.isActive && templates.filter((x: any) => x.id !== t.id && x.slotsCount > 0).length > 0 && (
+                            <button
+                              onClick={() => setCopyingToId(t.id)}
+                              className="p-1.5 rounded-lg text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"
+                              title="Copiar slots desde otra plantilla"
+                            >
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                                <path d="M12 12l4 4-4 4"/>
+                              </svg>
+                            </button>
+                          )}
                           <button
                             onClick={() => {
                               setEditingTemplate(t)
@@ -417,6 +430,60 @@ function TemplateManagerModal({ templates: initialTemplates, locationId, organiz
               >
                 <Plus size={16} /> Nueva plantilla
               </button>
+            </div>
+          )}
+
+          {/* ── COPIAR DESDE OTRA PLANTILLA ── */}
+          {copyingToId && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={() => setCopyingToId(null)}>
+              <div className="absolute inset-0 bg-black/30 backdrop-blur-[2px]" />
+              <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-[400px] overflow-hidden" onClick={e => e.stopPropagation()}>
+                <div className="px-5 py-4 border-b border-gray-100" style={{ background: 'linear-gradient(135deg,#f0fdf4,#dcfce7)' }}>
+                  <h3 className="text-[14px] font-bold text-gray-900">Copiar configuración desde...</h3>
+                  <p className="text-[11px] text-gray-500 mt-0.5">
+                    Se copiarán todos los slots a <strong>{templates.find((t: any) => t.id === copyingToId)?.name}</strong>. Los slots actuales se reemplazarán.
+                  </p>
+                </div>
+                <div className="px-5 py-4 space-y-2 max-h-[50vh] overflow-y-auto">
+                  {templates
+                    .filter((t: any) => t.id !== copyingToId && t.slotsCount > 0)
+                    .map((t: any) => (
+                      <button
+                        key={t.id}
+                        disabled={isPending}
+                        onClick={() => startTransition(async () => {
+                          try {
+                            const result = await copySlotsBetweenTemplates(t.id, copyingToId, locationId, organizationId)
+                            toast.success(`${result.copied} slots copiados desde "${t.name}" ✓`)
+                            setTemplates((prev: any[]) => prev.map((p: any) =>
+                              p.id === copyingToId ? { ...p, slotsCount: result.copied } : p
+                            ))
+                            setCopyingToId(null)
+                            router.refresh()
+                          } catch (e: any) { toast.error(e.message) }
+                        })}
+                        className="w-full flex items-center gap-3 p-3 rounded-xl border border-gray-200 hover:border-emerald-300 hover:bg-emerald-50 transition-all text-left disabled:opacity-50"
+                      >
+                        <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: t.color }} />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[13px] font-semibold text-gray-800 truncate">{t.name}</div>
+                          <div className="text-[11px] text-gray-400">{t.slotsCount} slots configurados</div>
+                        </div>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-emerald-500 flex-shrink-0">
+                          <path d="M5 12h14M12 5l7 7-7 7"/>
+                        </svg>
+                      </button>
+                    ))}
+                  {templates.filter((t: any) => t.id !== copyingToId && t.slotsCount > 0).length === 0 && (
+                    <p className="text-[13px] text-gray-400 text-center py-4">No hay otras plantillas con slots configurados</p>
+                  )}
+                </div>
+                <div className="px-5 py-3 border-t border-gray-100 bg-gray-50/50">
+                  <button onClick={() => setCopyingToId(null)} className="w-full py-2 rounded-xl text-[13px] text-gray-500 hover:bg-gray-100">
+                    Cancelar
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 

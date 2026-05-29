@@ -58,15 +58,6 @@ export async function deleteCoverageSlot(id: string) {
   return { success: true }
 }
 
-// ── Borrar todos los slots de una plantilla (bulk) ─────────────────────────
-export async function clearAllSlots(templateId: string, locationId: string) {
-  await prisma.coverageRequirement.deleteMany({
-    where: { templateId, locationId },
-  })
-  revalidatePath('/coverage')
-  return { success: true }
-}
-
 // ── Copiar un día completo a otro ──────────────────────────────────────────
 export async function copyDaySlots(
   locationId: string,
@@ -205,6 +196,48 @@ export async function loadCoverageTemplate(
 
   revalidatePath('/coverage')
   return { loaded: slots.length }
+}
+
+// ── Copiar slots de una plantilla a otra ─────────────────────────────────
+export async function copySlotsBetweenTemplates(
+  fromTemplateId: string,
+  toTemplateId: string,
+  locationId: string,
+  organizationId: string,
+) {
+  // Obtener slots origen
+  const source = await prisma.coverageRequirement.findMany({
+    where: { templateId: fromTemplateId, locationId },
+  })
+
+  if (source.length === 0) throw new Error('La plantilla origen no tiene slots configurados')
+
+  // Borrar slots destino
+  await prisma.coverageRequirement.deleteMany({
+    where: { templateId: toTemplateId, locationId },
+  })
+
+  // Copiar slots al destino
+  await prisma.coverageRequirement.createMany({
+    data: source.map(s => ({
+      locationId,
+      organizationId,
+      templateId: toTemplateId,
+      dayOfWeek: s.dayOfWeek,
+      startTime: s.startTime,
+      endTime: s.endTime,
+      minWorkers: s.minWorkers,
+      idealWorkers: s.idealWorkers,
+      laborRoleId: s.laborRoleId,
+      skillId: s.skillId,
+      isRequired: s.isRequired,
+      notes: s.notes,
+      priority: s.priority,
+    })),
+  })
+
+  revalidatePath('/coverage')
+  return { copied: source.length }
 }
 
 // ── Generar slots de 30min automáticamente para un rango ──────────────────
