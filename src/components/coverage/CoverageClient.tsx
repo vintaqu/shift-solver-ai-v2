@@ -590,7 +590,7 @@ function TemplateManagerModal({ templates: initialTemplates, locationId, organiz
                     </div>
                   )}
 
-                <div className="flex justify-between px-5 py-4 border-t border-gray-100 bg-gray-50/50">
+                <div className="flex justify-between px-6 py-4 border-t border-gray-100 bg-gray-50/50 flex-shrink-0">
                   <button onClick={() => setEditingTemplate(null)} className="px-4 py-2 rounded-xl text-[13px] text-gray-500 hover:bg-gray-100">
                     Cancelar
                   </button>
