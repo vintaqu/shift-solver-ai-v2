@@ -1353,6 +1353,11 @@ function ListView({ slots, onEdit, onDelete }: any) {
                     {slot.laborRole && (
                       <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full text-white" style={{ backgroundColor: slot.laborRole.color }}>{slot.laborRole.name}</span>
                     )}
+                    {slot.notes && (
+                      <span className="text-[11px] text-gray-400 italic truncate max-w-[180px]" title={slot.notes}>
+                        📝 {slot.notes}
+                      </span>
+                    )}
                     {slot.isRequired && <span className="text-[10px] text-red-500 font-semibold ml-auto">Obligatorio</span>}
                     <div className={cn('flex items-center gap-1', !slot.isRequired && 'ml-auto')}>
                       <button onClick={() => onEdit(slot)} className="p-1.5 rounded-lg hover:bg-indigo-50 text-gray-400 hover:text-indigo-600 transition-colors"><Pencil size={13} /></button>
