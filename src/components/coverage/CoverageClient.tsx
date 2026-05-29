@@ -1382,11 +1382,17 @@ export function CoverageClient({ templates, initialTemplateId, initialSlots, rol
     setCreateDay(day); setCreateTime(time); setSlotModal('create')
   }
 
+  const [confirmClearAll, setConfirmClearAll] = useState(false)
+
   function handleClearAll() {
-    if (!confirm('¿Borrar todos los slots de esta plantilla? Esta acción no se puede deshacer.')) return
+    setConfirmClearAll(true)
+  }
+
+  function executeClearAll() {
+    setConfirmClearAll(false)
     startTransition(async () => {
       try {
-        for (const slot of initialSlots) await deleteCoverageSlot(slot.id)
+        await clearAllSlots(selectedTemplateId!, locationId)
         toast.success('Todos los slots eliminados')
         router.refresh()
       } catch (e: any) { toast.error(e.message) }
@@ -1510,6 +1516,29 @@ export function CoverageClient({ templates, initialTemplateId, initialSlots, rol
         <TemplatesModal locationId={locationId} organizationId={organizationId} templateId={selectedTemplateId}
           onClose={() => setShowTemplates(false)} onLoaded={() => { setShowTemplates(false); router.refresh() }} />
       )}
+      {/* Confirm clear all */}
+      {confirmClearAll && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={() => setConfirmClearAll(false)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-[400px] p-6">
+            <h3 className="text-[15px] font-bold text-gray-900 mb-2">¿Borrar todos los slots?</h3>
+            <p className="text-[13px] text-gray-500 mb-5">
+              Se eliminarán <strong>{initialSlots.length} slots</strong> de esta plantilla. Esta acción no se puede deshacer.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setConfirmClearAll(false)}
+                className="px-4 py-2 rounded-xl text-[13px] text-gray-500 hover:bg-gray-100">
+                Cancelar
+              </button>
+              <button onClick={executeClearAll}
+                className="px-5 py-2 rounded-xl bg-red-600 text-white text-[13px] font-semibold hover:bg-red-700">
+                Sí, borrar todos
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showGenerate && (
         <GenerateSlotsModal locationId={locationId} organizationId={organizationId} templateId={selectedTemplateId}
           defaultOpenTime={activeTemplate?.openingTime ?? '09:00'} defaultCloseTime={activeTemplate?.closingTime ?? '23:00'}
