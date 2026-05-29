@@ -58,6 +58,15 @@ export async function deleteCoverageSlot(id: string) {
   return { success: true }
 }
 
+// ── Borrar todos los slots de una plantilla (bulk) ─────────────────────────
+export async function clearAllSlots(templateId: string, locationId: string) {
+  await prisma.coverageRequirement.deleteMany({
+    where: { templateId, locationId },
+  })
+  revalidatePath('/coverage')
+  return { success: true }
+}
+
 // ── Copiar un día completo a otro ──────────────────────────────────────────
 export async function copyDaySlots(
   locationId: string,
