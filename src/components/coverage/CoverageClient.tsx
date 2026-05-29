@@ -23,7 +23,6 @@ import { evaluateTemplateStatus } from '@/lib/coverageTemplateUtils'
 // ─── Constantes ───────────────────────────────────────────────────────────────
 const DAYS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
 const DAYS_SHORT = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
-const MONTHS_ES_SHORT = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
 
 const ALL_TIME_SLOTS_24H: string[] = []
 for (let h = 0; h < 24; h++) {
@@ -237,22 +236,22 @@ function TemplateManagerModal({ templates: initialTemplates, locationId, organiz
     name: '', description: '', color: '#6366f1',
     openingTime: '09:00', closingTime: '23:00',
     activationType: 'MANUAL' as 'MANUAL' | 'SCHEDULED',
-    schedStartMonth: 6, schedStartDay: 1,
-    schedEndMonth: 9, schedEndDay: 30,
+    scheduledFrom: '',
+    scheduledTo: '',
   })
   const [createForm, setCreateForm] = useState({
     name: '', description: '', color: '#6366f1',
     openingTime: '09:00', closingTime: '23:00',
     activationType: 'MANUAL' as 'MANUAL' | 'SCHEDULED',
-    schedStartMonth: 6, schedStartDay: 1,
-    schedEndMonth: 9, schedEndDay: 30,
+    scheduledFrom: '',
+    scheduledTo: '',
   })
   const [activating, setActivating] = useState<any>(null)
   const [activateForm, setActivateForm] = useState({
     type: 'MANUAL' as 'MANUAL' | 'SCHEDULED',
     activeUntil: '', hasEndDate: false,
-    schedStartMonth: 6, schedStartDay: 1,
-    schedEndMonth: 9, schedEndDay: 30,
+    scheduledFrom: '',
+    scheduledTo: '',
   })
 
   const COLORS = ['#6366f1','#10b981','#f59e0b','#ef4444','#8b5cf6','#0891b2','#ec4899','#64748b','#84cc16']
@@ -301,8 +300,8 @@ function TemplateManagerModal({ templates: initialTemplates, locationId, organiz
                           {t.description && <p className="text-[11px] text-gray-500 mt-0.5">{t.description}</p>}
                           <div className="flex items-center gap-3 mt-1 text-[11px] text-gray-400">
                             <span>{t.slotsCount} slots</span>
-                            {t.activationType === 'SCHEDULED' && t.schedStartMonth && (
-                              <span>· {MONTHS_ES_SHORT[t.schedStartMonth - 1]} – {MONTHS_ES_SHORT[(t.schedEndMonth ?? 1) - 1]} (anual)</span>
+                            {t.activationType === 'SCHEDULED' && t.scheduledFrom && (
+                              <span>· {new Date(t.scheduledFrom).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })} – {t.scheduledTo ? new Date(t.scheduledTo).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }) : '?'}</span>
                             )}
                           </div>
                         </div>
@@ -357,10 +356,8 @@ function TemplateManagerModal({ templates: initialTemplates, locationId, organiz
                                 openingTime: t.openingTime ?? '09:00',
                                 closingTime: t.closingTime ?? '23:00',
                                 activationType: (t.activationType as 'MANUAL' | 'SCHEDULED') ?? 'MANUAL',
-                                schedStartMonth: t.schedStartMonth ?? 6,
-                                schedStartDay: t.schedStartDay ?? 1,
-                                schedEndMonth: t.schedEndMonth ?? 9,
-                                schedEndDay: t.schedEndDay ?? 30,
+                                scheduledFrom: t.scheduledFrom ? new Date(t.scheduledFrom).toISOString().split('T')[0] : '',
+                                scheduledTo: t.scheduledTo ? new Date(t.scheduledTo).toISOString().split('T')[0] : '',
                               })
                             }}
                             className="p-1.5 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
@@ -508,43 +505,20 @@ function TemplateManagerModal({ templates: initialTemplates, locationId, organiz
                     </div>
                   </div>
 
-                  {/* Rango fechas si es SCHEDULED */}
+                  {/* Fechas concretas si es SCHEDULED */}
                   {editForm.activationType === 'SCHEDULED' && (
-                    <div>
-                      <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Rango de fechas anual</label>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <div className="text-[10px] text-gray-400 mb-1">Mes inicio</div>
-                          <select value={editForm.schedStartMonth}
-                            onChange={e => setEditForm(f => ({ ...f, schedStartMonth: +e.target.value }))}
-                            className="w-full border border-gray-200 rounded-xl px-3 py-2 text-[13px] bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-300">
-                            {['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'].map((m, i) => (
-                              <option key={i} value={i+1}>{m}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <div className="text-[10px] text-gray-400 mb-1">Día inicio</div>
-                          <input type="number" min={1} max={31} value={editForm.schedStartDay}
-                            onChange={e => setEditForm(f => ({ ...f, schedStartDay: +e.target.value }))}
-                            className="w-full border border-gray-200 rounded-xl px-3 py-2 text-[13px] bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-300" />
-                        </div>
-                        <div>
-                          <div className="text-[10px] text-gray-400 mb-1">Mes fin</div>
-                          <select value={editForm.schedEndMonth}
-                            onChange={e => setEditForm(f => ({ ...f, schedEndMonth: +e.target.value }))}
-                            className="w-full border border-gray-200 rounded-xl px-3 py-2 text-[13px] bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-300">
-                            {['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'].map((m, i) => (
-                              <option key={i} value={i+1}>{m}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <div className="text-[10px] text-gray-400 mb-1">Día fin</div>
-                          <input type="number" min={1} max={31} value={editForm.schedEndDay}
-                            onChange={e => setEditForm(f => ({ ...f, schedEndDay: +e.target.value }))}
-                            className="w-full border border-gray-200 rounded-xl px-3 py-2 text-[13px] bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-300" />
-                        </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[10px] text-gray-400 mb-1">Fecha inicio</label>
+                        <input type="date" value={editForm.scheduledFrom}
+                          onChange={e => setEditForm(f => ({ ...f, scheduledFrom: e.target.value }))}
+                          className="w-full border border-gray-200 rounded-xl px-3 py-2 text-[13px] bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-gray-400 mb-1">Fecha fin</label>
+                        <input type="date" value={editForm.scheduledTo}
+                          onChange={e => setEditForm(f => ({ ...f, scheduledTo: e.target.value }))}
+                          className="w-full border border-gray-200 rounded-xl px-3 py-2 text-[13px] bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-300" />
                       </div>
                     </div>
                   )}
@@ -564,10 +538,8 @@ function TemplateManagerModal({ templates: initialTemplates, locationId, organiz
                           openingTime: editForm.openingTime,
                           closingTime: editForm.closingTime,
                           activationType: editForm.activationType,
-                          schedStartMonth: editForm.activationType === 'SCHEDULED' ? editForm.schedStartMonth : undefined,
-                          schedStartDay: editForm.activationType === 'SCHEDULED' ? editForm.schedStartDay : undefined,
-                          schedEndMonth: editForm.activationType === 'SCHEDULED' ? editForm.schedEndMonth : undefined,
-                          schedEndDay: editForm.activationType === 'SCHEDULED' ? editForm.schedEndDay : undefined,
+                          scheduledFrom: editForm.activationType === 'SCHEDULED' ? editForm.scheduledFrom : undefined,
+                          scheduledTo: editForm.activationType === 'SCHEDULED' ? editForm.scheduledTo : undefined,
                         })
                         toast.success('Plantilla actualizada ✓')
                         setTemplates((prev: any[]) => prev.map((t: any) =>
@@ -575,8 +547,7 @@ function TemplateManagerModal({ templates: initialTemplates, locationId, organiz
                             ? { ...t, name: editForm.name.trim(), description: editForm.description, color: editForm.color,
                                 openingTime: editForm.openingTime, closingTime: editForm.closingTime,
                                 activationType: editForm.activationType,
-                                schedStartMonth: editForm.schedStartMonth, schedStartDay: editForm.schedStartDay,
-                                schedEndMonth: editForm.schedEndMonth, schedEndDay: editForm.schedEndDay }
+                                scheduledFrom: editForm.scheduledFrom, scheduledTo: editForm.scheduledTo }
                             : t
                         ))
                         setEditingTemplate(null)
@@ -689,27 +660,17 @@ function TemplateManagerModal({ templates: initialTemplates, locationId, organiz
               )}
 
               {createForm.activationType === 'SCHEDULED' && (
-                <Field label="Rango de fechas anual">
+                <Field label="Rango de fechas">
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <div className="text-[11px] text-gray-400 mb-1">Mes inicio</div>
-                      <select className={inputCls()} value={createForm.schedStartMonth} onChange={e => setCreateForm(f => ({ ...f, schedStartMonth: Number(e.target.value) }))}>
-                        {MONTHS_ES_SHORT.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
-                      </select>
+                      <div className="text-[11px] text-gray-400 mb-1">Fecha inicio</div>
+                      <input type="date" className={inputCls()} value={createForm.scheduledFrom}
+                        onChange={e => setCreateForm(f => ({ ...f, scheduledFrom: e.target.value }))} />
                     </div>
                     <div>
-                      <div className="text-[11px] text-gray-400 mb-1">Día inicio</div>
-                      <input type="number" min={1} max={31} className={inputCls()} value={createForm.schedStartDay} onChange={e => setCreateForm(f => ({ ...f, schedStartDay: Number(e.target.value) }))} />
-                    </div>
-                    <div>
-                      <div className="text-[11px] text-gray-400 mb-1">Mes fin</div>
-                      <select className={inputCls()} value={createForm.schedEndMonth} onChange={e => setCreateForm(f => ({ ...f, schedEndMonth: Number(e.target.value) }))}>
-                        {MONTHS_ES_SHORT.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <div className="text-[11px] text-gray-400 mb-1">Día fin</div>
-                      <input type="number" min={1} max={31} className={inputCls()} value={createForm.schedEndDay} onChange={e => setCreateForm(f => ({ ...f, schedEndDay: Number(e.target.value) }))} />
+                      <div className="text-[11px] text-gray-400 mb-1">Fecha fin</div>
+                      <input type="date" className={inputCls()} value={createForm.scheduledTo}
+                        onChange={e => setCreateForm(f => ({ ...f, scheduledTo: e.target.value }))} />
                     </div>
                   </div>
                 </Field>
@@ -738,10 +699,8 @@ function TemplateManagerModal({ templates: initialTemplates, locationId, organiz
                       } else if (createForm.activationType === 'SCHEDULED') {
                         await activateTemplate(newTemplate.id, {
                           type: 'SCHEDULED',
-                          schedStartMonth: createForm.schedStartMonth,
-                          schedStartDay: createForm.schedStartDay,
-                          schedEndMonth: createForm.schedEndMonth,
-                          schedEndDay: createForm.schedEndDay,
+                          scheduledFrom: createForm.scheduledFrom,
+                          scheduledTo: createForm.scheduledTo,
                         })
                       }
                       toast.success(`Plantilla "${newTemplate.name}" creada ✓`)

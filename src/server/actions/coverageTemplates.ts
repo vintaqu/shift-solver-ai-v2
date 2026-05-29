@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/prisma'
-import { evaluateTemplateStatus, isInScheduledRange } from '@/lib/coverageTemplateUtils'
+import { evaluateTemplateStatus } from '@/lib/coverageTemplateUtils'
 
 // ── Obtener la plantilla activa para el solver/cobertura ──────────────────
 export async function getActiveTemplate(locationId: string) {
@@ -20,8 +20,10 @@ export async function getActiveTemplate(locationId: string) {
   if (manualActive) return manualActive
 
   // 2. Buscar activa SCHEDULED en rango
-  const scheduledActive = templates.find(t =>
-    t.isActive && t.activationType === 'SCHEDULED' && isInScheduledRange(t, now)
+  const scheduledActive = templates.find((t: any) =>
+    t.isActive && t.activationType === 'SCHEDULED' &&
+    t.scheduledFrom && t.scheduledTo &&
+    new Date(t.scheduledFrom) <= now && now <= new Date(t.scheduledTo)
   )
   if (scheduledActive) return scheduledActive
 
@@ -75,10 +77,8 @@ export async function updateTemplate(id: string, data: {
   openingTime?: string
   closingTime?: string
   activationType?: string
-  schedStartMonth?: number
-  schedStartDay?: number
-  schedEndMonth?: number
-  schedEndDay?: number
+  scheduledFrom?: string
+  scheduledTo?: string
 }) {
 
   const updated = await prisma.coverageTemplate.update({
@@ -115,10 +115,8 @@ export async function activateTemplate(id: string, options: {
   activeUntil?: string | null  // ISO date o null para indefinido
 } | {
   type: 'SCHEDULED'
-  schedStartMonth: number
-  schedStartDay: number
-  schedEndMonth: number
-  schedEndDay: number
+  scheduledFrom: string
+  scheduledTo: string
 }) {
   const template = await prisma.coverageTemplate.findUnique({ where: { id } })
   if (!template) throw new Error('Plantilla no encontrada')
@@ -138,10 +136,8 @@ export async function activateTemplate(id: string, options: {
       activeUntil: options.type === 'MANUAL' && options.activeUntil
         ? new Date(options.activeUntil)
         : null,
-      schedStartMonth: options.type === 'SCHEDULED' ? options.schedStartMonth : null,
-      schedStartDay:   options.type === 'SCHEDULED' ? options.schedStartDay   : null,
-      schedEndMonth:   options.type === 'SCHEDULED' ? options.schedEndMonth   : null,
-      schedEndDay:     options.type === 'SCHEDULED' ? options.schedEndDay     : null,
+      scheduledFrom: options.type === 'SCHEDULED' ? new Date(options.scheduledFrom) : null,
+      scheduledTo:   options.type === 'SCHEDULED' ? new Date(options.scheduledTo)   : null,
     },
   })
 
@@ -262,10 +258,8 @@ export async function getTemplatesForLocation(locationId: string) {
       isActive: t.isActive,
       activationType: t.activationType,
       activeUntil: t.activeUntil,
-      schedStartMonth: t.schedStartMonth,
-      schedStartDay: t.schedStartDay,
-      schedEndMonth: t.schedEndMonth,
-      schedEndDay: t.schedEndDay,
+      scheduledFrom: (t as any).scheduledFrom ?? null,
+      scheduledTo: (t as any).scheduledTo ?? null,
     }),
   }))
 }
