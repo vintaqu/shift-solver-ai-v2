@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/prisma'
 import { evaluateTemplateStatus } from '@/lib/coverageTemplateUtils'
+import { generateSlotsForDay } from '@/server/actions/coverage'
 
 // ── Obtener la plantilla activa para el solver/cobertura ──────────────────
 export async function getActiveTemplate(locationId: string) {
@@ -65,6 +66,22 @@ export async function createTemplate(data: {
       closingTime: data.closingTime ?? '00:00',
     },
   })
+
+  // Generar slots vacíos automáticamente si se definió horario
+  if (data.openingTime && data.closingTime) {
+    for (let day = 0; day < 7; day++) {
+      await generateSlotsForDay(
+        data.locationId,
+        data.organizationId,
+        day,
+        data.openingTime,
+        data.closingTime,
+        0,  // minWorkers = 0 (sin cubrir)
+        0,  // idealWorkers = 0
+        template.id,
+      )
+    }
+  }
 
   revalidatePath('/coverage')
   return template
