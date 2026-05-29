@@ -198,26 +198,29 @@ export async function loadCoverageTemplate(
   return { loaded: slots.length }
 }
 
-// ── Copiar slots de una plantilla a otra ─────────────────────────────────
+// ── Borrar todos los slots de una plantilla (bulk) ───────────────────────
+export async function clearAllSlots(templateId: string, locationId: string) {
+  await prisma.coverageRequirement.deleteMany({
+    where: { templateId, locationId },
+  })
+  revalidatePath('/coverage')
+  return { success: true }
+}
+
+// ── Copiar slots de una plantilla a otra ──────────────────────────────────
 export async function copySlotsBetweenTemplates(
   fromTemplateId: string,
   toTemplateId: string,
   locationId: string,
   organizationId: string,
 ) {
-  // Obtener slots origen
   const source = await prisma.coverageRequirement.findMany({
     where: { templateId: fromTemplateId, locationId },
   })
-
   if (source.length === 0) throw new Error('La plantilla origen no tiene slots configurados')
-
-  // Borrar slots destino
   await prisma.coverageRequirement.deleteMany({
     where: { templateId: toTemplateId, locationId },
   })
-
-  // Copiar slots al destino
   await prisma.coverageRequirement.createMany({
     data: source.map(s => ({
       locationId,
@@ -235,7 +238,6 @@ export async function copySlotsBetweenTemplates(
       priority: s.priority,
     })),
   })
-
   revalidatePath('/coverage')
   return { copied: source.length }
 }
