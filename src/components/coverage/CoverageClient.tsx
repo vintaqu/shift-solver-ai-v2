@@ -720,16 +720,23 @@ function TemplateManagerModal({ templates: initialTemplates, locationId, organiz
                   Cancelar
                 </button>
                 <button
-                  disabled={isPending}
+                  disabled={isPending || !createForm.name.trim()}
                   onClick={() => startTransition(async () => {
                     try {
-                      if (activateForm.type === 'MANUAL') {
-                        
-                          type: 'MANUAL',
-                          activeUntil: activateForm.hasEndDate && activateForm.activeUntil ? activateForm.activeUntil : null,
-                        })
-                      } else {
-                        
+                      if (!createForm.name.trim()) { toast.error('El nombre es obligatorio'); return }
+                      const newTemplate = await createTemplate({
+                        organizationId,
+                        locationId,
+                        name: createForm.name.trim(),
+                        description: createForm.description.trim() || undefined,
+                        color: createForm.color,
+                        openingTime: createForm.openingTime,
+                        closingTime: createForm.closingTime,
+                      })
+                      if (createForm.activationType === 'MANUAL') {
+                        await activateTemplate(newTemplate.id, { type: 'MANUAL', activeUntil: null })
+                      } else if (createForm.activationType === 'SCHEDULED') {
+                        await activateTemplate(newTemplate.id, {
                           type: 'SCHEDULED',
                           schedStartMonth: createForm.schedStartMonth,
                           schedStartDay: createForm.schedStartDay,
@@ -737,19 +744,18 @@ function TemplateManagerModal({ templates: initialTemplates, locationId, organiz
                           schedEndDay: createForm.schedEndDay,
                         })
                       }
-                      toast.success(`Plantilla "${activating.name}" activada ✓`)
+                      toast.success(`Plantilla "${newTemplate.name}" creada ✓`)
                       onChanged()
                     } catch (e: any) { toast.error(e.message) }
                   })}
                   className="flex items-center gap-2 px-5 py-2 rounded-xl bg-emerald-600 text-white text-[13px] font-semibold hover:bg-emerald-700 disabled:opacity-50 transition-colors"
                 >
                   {isPending ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
-                  Activar plantilla
+                  Crear plantilla
                 </button>
               </div>
             </div>
           )}
-        </div>
       </div>
     </div>
   )
