@@ -243,6 +243,9 @@ function TemplateManagerModal({ templates: initialTemplates, locationId, organiz
   const [createForm, setCreateForm] = useState({
     name: '', description: '', color: '#6366f1',
     openingTime: '09:00', closingTime: '23:00',
+    activationType: 'MANUAL' as 'MANUAL' | 'SCHEDULED',
+    schedStartMonth: 6, schedStartDay: 1,
+    schedEndMonth: 9, schedEndDay: 30,
   })
   const [activating, setActivating] = useState<any>(null)
   const [activateForm, setActivateForm] = useState({
@@ -651,11 +654,11 @@ function TemplateManagerModal({ templates: initialTemplates, locationId, organiz
                   ].map(opt => (
                     <label
                       key={opt.value}
-                      className={cn('flex items-start gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition-all', activateForm.type === opt.value ? 'border-emerald-400 bg-emerald-50' : 'border-gray-200 bg-white hover:border-gray-300')}
-                      onClick={() => setActivateForm(f => ({ ...f, type: opt.value as any }))}
+                      className={cn('flex items-start gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition-all', createForm.activationType === opt.value ? 'border-emerald-400 bg-emerald-50' : 'border-gray-200 bg-white hover:border-gray-300')}
+                      onClick={() => setCreateForm(f => ({ ...f, activationType: opt.value as any }))}
                     >
-                      <div className={cn('w-4 h-4 rounded-full border-2 flex-shrink-0 mt-0.5 flex items-center justify-center', activateForm.type === opt.value ? 'border-emerald-500 bg-emerald-500' : 'border-gray-300')}>
-                        {activateForm.type === opt.value && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                      <div className={cn('w-4 h-4 rounded-full border-2 flex-shrink-0 mt-0.5 flex items-center justify-center', createForm.activationType === opt.value ? 'border-emerald-500 bg-emerald-500' : 'border-gray-300')}>
+                        {createForm.activationType === opt.value && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
                       </div>
                       <div>
                         <div className="text-[13px] font-semibold text-gray-800">{opt.title}</div>
@@ -685,28 +688,28 @@ function TemplateManagerModal({ templates: initialTemplates, locationId, organiz
                 </div>
               )}
 
-              {activateForm.type === 'SCHEDULED' && (
+              {createForm.activationType === 'SCHEDULED' && (
                 <Field label="Rango de fechas anual">
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <div className="text-[11px] text-gray-400 mb-1">Mes inicio</div>
-                      <select className={inputCls()} value={activateForm.schedStartMonth} onChange={e => setActivateForm(f => ({ ...f, schedStartMonth: Number(e.target.value) }))}>
+                      <select className={inputCls()} value={createForm.schedStartMonth} onChange={e => setCreateForm(f => ({ ...f, schedStartMonth: Number(e.target.value) }))}>
                         {MONTHS_ES_SHORT.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
                       </select>
                     </div>
                     <div>
                       <div className="text-[11px] text-gray-400 mb-1">Día inicio</div>
-                      <input type="number" min={1} max={31} className={inputCls()} value={activateForm.schedStartDay} onChange={e => setActivateForm(f => ({ ...f, schedStartDay: Number(e.target.value) }))} />
+                      <input type="number" min={1} max={31} className={inputCls()} value={createForm.schedStartDay} onChange={e => setCreateForm(f => ({ ...f, schedStartDay: Number(e.target.value) }))} />
                     </div>
                     <div>
                       <div className="text-[11px] text-gray-400 mb-1">Mes fin</div>
-                      <select className={inputCls()} value={activateForm.schedEndMonth} onChange={e => setActivateForm(f => ({ ...f, schedEndMonth: Number(e.target.value) }))}>
+                      <select className={inputCls()} value={createForm.schedEndMonth} onChange={e => setCreateForm(f => ({ ...f, schedEndMonth: Number(e.target.value) }))}>
                         {MONTHS_ES_SHORT.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
                       </select>
                     </div>
                     <div>
                       <div className="text-[11px] text-gray-400 mb-1">Día fin</div>
-                      <input type="number" min={1} max={31} className={inputCls()} value={activateForm.schedEndDay} onChange={e => setActivateForm(f => ({ ...f, schedEndDay: Number(e.target.value) }))} />
+                      <input type="number" min={1} max={31} className={inputCls()} value={createForm.schedEndDay} onChange={e => setCreateForm(f => ({ ...f, schedEndDay: Number(e.target.value) }))} />
                     </div>
                   </div>
                 </Field>
@@ -721,17 +724,17 @@ function TemplateManagerModal({ templates: initialTemplates, locationId, organiz
                   onClick={() => startTransition(async () => {
                     try {
                       if (activateForm.type === 'MANUAL') {
-                        await activateTemplate(activating.id, {
+                        
                           type: 'MANUAL',
                           activeUntil: activateForm.hasEndDate && activateForm.activeUntil ? activateForm.activeUntil : null,
                         })
                       } else {
-                        await activateTemplate(activating.id, {
+                        
                           type: 'SCHEDULED',
-                          schedStartMonth: activateForm.schedStartMonth,
-                          schedStartDay: activateForm.schedStartDay,
-                          schedEndMonth: activateForm.schedEndMonth,
-                          schedEndDay: activateForm.schedEndDay,
+                          schedStartMonth: createForm.schedStartMonth,
+                          schedStartDay: createForm.schedStartDay,
+                          schedEndMonth: createForm.schedEndMonth,
+                          schedEndDay: createForm.schedEndDay,
                         })
                       }
                       toast.success(`Plantilla "${activating.name}" activada ✓`)
