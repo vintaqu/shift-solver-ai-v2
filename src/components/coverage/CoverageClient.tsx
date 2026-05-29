@@ -756,6 +756,7 @@ function TemplateManagerModal({ templates: initialTemplates, locationId, organiz
               </div>
             </div>
           )}
+        </div>
       </div>
     </div>
   )
