@@ -128,18 +128,16 @@ export async function activateTemplate(id: string, options: {
   })
 
   // Activar ésta
-  await prisma.coverageTemplate.update({
-    where: { id },
-    data: {
-      isActive: true,
-      activationType: options.type,
-      activeUntil: options.type === 'MANUAL' && options.activeUntil
-        ? new Date(options.activeUntil)
-        : null,
-      scheduledFrom: options.type === 'SCHEDULED' ? new Date(options.scheduledFrom) : null,
-      scheduledTo:   options.type === 'SCHEDULED' ? new Date(options.scheduledTo)   : null,
-    },
-  })
+  const updateData: any = {
+    isActive: true,
+    activationType: options.type,
+    activeUntil: options.type === 'MANUAL' && options.activeUntil
+      ? new Date(options.activeUntil)
+      : null,
+    scheduledFrom: options.type === 'SCHEDULED' ? new Date((options as any).scheduledFrom) : null,
+    scheduledTo:   options.type === 'SCHEDULED' ? new Date((options as any).scheduledTo)   : null,
+  }
+  await prisma.coverageTemplate.update({ where: { id }, data: updateData })
 
   revalidatePath('/coverage')
   return { success: true }
@@ -254,7 +252,6 @@ export async function getTemplatesForLocation(locationId: string) {
     ...t,
     slotsCount: t._count.coverageRequirements,
     computedStatus: evaluateTemplateStatus({
-      isDefault: t.isDefault,
       isActive: t.isActive,
       activationType: t.activationType,
       activeUntil: t.activeUntil,
