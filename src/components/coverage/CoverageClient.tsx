@@ -1107,8 +1107,10 @@ function CopyDayModal({ locationId, organizationId, templateId, dayRanges, onClo
 function SlotModal({ slot, defaultDay, defaultTime, locationId, organizationId, templateId, roles, skills, onClose, onSaved }: any) {
   const [isPending, startTransition] = useTransition()
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const isEdit = !!slot
   const [form, setForm] = useState({
-    dayOfWeek: slot?.dayOfWeek ?? defaultDay,
+    dayOfWeek: slot?.dayOfWeek ?? defaultDay,  // used in edit mode
+    days: isEdit ? [slot?.dayOfWeek ?? defaultDay] : (defaultDay !== null && defaultDay !== undefined ? [defaultDay] : [0,1,2,3,4]),  // used in create mode
     startTime: slot?.startTime ?? defaultTime,
     endTime: slot?.endTime ?? nextSlot(defaultTime),
     minWorkers: slot?.minWorkers ?? 2,
@@ -1119,20 +1121,55 @@ function SlotModal({ slot, defaultDay, defaultTime, locationId, organizationId, 
     notes: slot?.notes ?? '',
   })
   const colors = demandColor(form.minWorkers)
-  const isEdit = !!slot
 
   return (
     <Modal title={isEdit ? 'Editar slot de cobertura' : 'Nuevo slot de cobertura'} onClose={onClose}>
       <div className="space-y-5">
-        <Field label="Día de la semana">
-          <div className="grid grid-cols-7 gap-1">
-            {DAYS_SHORT.map((d, i) => (
-              <button key={i} onClick={() => setForm(f => ({ ...f, dayOfWeek: i }))}
-                className={cn('py-2 rounded-xl text-[12px] font-bold transition-all', form.dayOfWeek === i ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200')}>
-                {d}
+        <Field label={isEdit ? "Día de la semana" : "Días de la semana"}>
+          {!isEdit && (
+            <div className="flex gap-1.5 mb-2">
+              <button onClick={() => setForm(f => ({ ...f, days: [0,1,2,3,4] }))}
+                className="text-[10px] font-medium px-2 py-1 rounded-lg bg-gray-100 hover:bg-indigo-100 hover:text-indigo-700 transition-colors">
+                Lun–Vie
               </button>
-            ))}
+              <button onClick={() => setForm(f => ({ ...f, days: [5,6] }))}
+                className="text-[10px] font-medium px-2 py-1 rounded-lg bg-gray-100 hover:bg-indigo-100 hover:text-indigo-700 transition-colors">
+                Fin de semana
+              </button>
+              <button onClick={() => setForm(f => ({ ...f, days: [0,1,2,3,4,5,6] }))}
+                className="text-[10px] font-medium px-2 py-1 rounded-lg bg-gray-100 hover:bg-indigo-100 hover:text-indigo-700 transition-colors">
+                Todos
+              </button>
+            </div>
+          )}
+          <div className="grid grid-cols-7 gap-1">
+            {DAYS_SHORT.map((d, i) => {
+              const active = isEdit ? form.dayOfWeek === i : form.days.includes(i)
+              return (
+                <button key={i}
+                  onClick={() => {
+                    if (isEdit) {
+                      setForm(f => ({ ...f, dayOfWeek: i }))
+                    } else {
+                      setForm(f => ({
+                        ...f,
+                        days: f.days.includes(i)
+                          ? f.days.filter(d => d !== i)
+                          : [...f.days, i]
+                      }))
+                    }
+                  }}
+                  className={cn('py-2 rounded-xl text-[12px] font-bold transition-all', active ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200')}>
+                  {d}
+                </button>
+              )
+            })}
           </div>
+          {!isEdit && form.days.length > 1 && (
+            <p className="text-[10px] text-indigo-600 mt-1.5">
+              Se crearán {form.days.length} slots (uno por día seleccionado)
+            </p>
+          )}
         </Field>
         <Field label="Horario">
           <div className="grid grid-cols-2 gap-3">
@@ -1218,8 +1255,16 @@ function SlotModal({ slot, defaultDay, defaultTime, locationId, organizationId, 
         onCancelDelete={() => setConfirmDelete(false)}
         onSave={() => startTransition(async () => {
           try {
-            await upsertCoverageSlot({ id: slot?.id, locationId, organizationId, templateId, ...form, laborRoleId: form.laborRoleId || null, skillId: form.skillId || null })
-            toast.success(isEdit ? 'Slot actualizado ✓' : 'Slot creado ✓')
+            if (isEdit) {
+              await upsertCoverageSlot({ id: slot?.id, locationId, organizationId, templateId, ...form, dayOfWeek: form.dayOfWeek, laborRoleId: form.laborRoleId || null, skillId: form.skillId || null })
+              toast.success('Slot actualizado ✓')
+            } else {
+              if (form.days.length === 0) { toast.error('Selecciona al menos un día'); return }
+              await Promise.all(form.days.map((day: number) =>
+                upsertCoverageSlot({ locationId, organizationId, templateId, ...form, dayOfWeek: day, laborRoleId: form.laborRoleId || null, skillId: form.skillId || null })
+              ))
+              toast.success(form.days.length === 1 ? 'Slot creado ✓' : `${form.days.length} slots creados ✓`)
+            }
             onSaved()
           } catch (e: any) { toast.error(e.message) }
         })}
