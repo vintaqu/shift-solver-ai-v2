@@ -47,7 +47,6 @@ export async function upsertCoverageSlot(data: {
   if (data.id) {
     slot = await prisma.coverageRequirement.update({ where: { id: data.id }, data: payload })
   } else {
-    // Check if a slot already exists for same day+time+template — update it instead of duplicating
     const existing = await prisma.coverageRequirement.findFirst({
       where: {
         locationId: data.locationId,
@@ -57,11 +56,9 @@ export async function upsertCoverageSlot(data: {
         endTime: data.endTime,
       }
     })
-    if (existing) {
-      slot = await prisma.coverageRequirement.update({ where: { id: existing.id }, data: payload })
-    } else {
-      slot = await prisma.coverageRequirement.create({ data: payload })
-    }
+    slot = existing
+      ? await prisma.coverageRequirement.update({ where: { id: existing.id }, data: payload })
+      : await prisma.coverageRequirement.create({ data: payload })
   }
 
   revalidatePath('/coverage')
@@ -213,6 +210,50 @@ export async function loadCoverageTemplate(
 
   revalidatePath('/coverage')
   return { loaded: slots.length }
+}
+
+// ── Borrar todos los slots de una plantilla (bulk) ───────────────────────
+export async function clearAllSlots(templateId: string, locationId: string) {
+  await prisma.coverageRequirement.deleteMany({
+    where: { templateId, locationId },
+  })
+  revalidatePath('/coverage')
+  return { success: true }
+}
+
+// ── Copiar slots de una plantilla a otra ──────────────────────────────────
+export async function copySlotsBetweenTemplates(
+  fromTemplateId: string,
+  toTemplateId: string,
+  locationId: string,
+  organizationId: string,
+) {
+  const source = await prisma.coverageRequirement.findMany({
+    where: { templateId: fromTemplateId, locationId },
+  })
+  if (source.length === 0) throw new Error('La plantilla origen no tiene slots configurados')
+  await prisma.coverageRequirement.deleteMany({
+    where: { templateId: toTemplateId, locationId },
+  })
+  await prisma.coverageRequirement.createMany({
+    data: source.map(s => ({
+      locationId,
+      organizationId,
+      templateId: toTemplateId,
+      dayOfWeek: s.dayOfWeek,
+      startTime: s.startTime,
+      endTime: s.endTime,
+      minWorkers: s.minWorkers,
+      idealWorkers: s.idealWorkers,
+      laborRoleId: s.laborRoleId,
+      skillId: s.skillId,
+      isRequired: s.isRequired,
+      notes: s.notes,
+      priority: s.priority,
+    })),
+  })
+  revalidatePath('/coverage')
+  return { copied: source.length }
 }
 
 // ── Generar slots de 30min automáticamente para un rango ──────────────────
