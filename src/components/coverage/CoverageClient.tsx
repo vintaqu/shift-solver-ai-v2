@@ -1261,7 +1261,21 @@ function SlotModal({ slot, defaultDay, defaultTime, locationId, organizationId, 
             } else {
               if (form.days.length === 0) { toast.error('Selecciona al menos un día'); return }
               await Promise.all(form.days.map((day: number) =>
-                upsertCoverageSlot({ locationId, organizationId, templateId, ...form, dayOfWeek: day, laborRoleId: form.laborRoleId || null, skillId: form.skillId || null })
+                upsertCoverageSlot({
+                  id: undefined,  // always create, never update
+                  locationId,
+                  organizationId,
+                  templateId,
+                  dayOfWeek: day,
+                  startTime: form.startTime,
+                  endTime: form.endTime,
+                  minWorkers: form.minWorkers,
+                  idealWorkers: form.idealWorkers,
+                  laborRoleId: form.laborRoleId || null,
+                  skillId: form.skillId || null,
+                  isRequired: form.isRequired,
+                  notes: form.notes,
+                })
               ))
               toast.success(form.days.length === 1 ? 'Slot creado ✓' : `${form.days.length} slots creados ✓`)
             }
