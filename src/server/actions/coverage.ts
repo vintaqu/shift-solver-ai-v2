@@ -47,18 +47,34 @@ export async function upsertCoverageSlot(data: {
   if (data.id) {
     slot = await prisma.coverageRequirement.update({ where: { id: data.id }, data: payload })
   } else {
-    const existing = await prisma.coverageRequirement.findFirst({
+    // Normalize templateId — undefined and null both mean "no template"
+    const templateIdFilter = data.templateId ?? null
+    // Find existing slot: match by startTime+endTime first, then by startTime only
+    let existing = await prisma.coverageRequirement.findFirst({
       where: {
         locationId: data.locationId,
-        templateId: data.templateId ?? null,
+        templateId: templateIdFilter,
         dayOfWeek: data.dayOfWeek,
         startTime: data.startTime,
         endTime: data.endTime,
       }
     })
-    slot = existing
-      ? await prisma.coverageRequirement.update({ where: { id: existing.id }, data: payload })
-      : await prisma.coverageRequirement.create({ data: payload })
+    // If no exact match, try matching by startTime only (user may have changed endTime)
+    if (!existing) {
+      existing = await prisma.coverageRequirement.findFirst({
+        where: {
+          locationId: data.locationId,
+          templateId: templateIdFilter,
+          dayOfWeek: data.dayOfWeek,
+          startTime: data.startTime,
+        }
+      })
+    }
+    if (existing) {
+      slot = await prisma.coverageRequirement.update({ where: { id: existing.id }, data: payload })
+    } else {
+      slot = await prisma.coverageRequirement.create({ data: payload })
+    }
   }
 
   revalidatePath('/coverage')
