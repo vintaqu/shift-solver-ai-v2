@@ -11,7 +11,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
-  upsertCoverageSlot, deleteCoverageSlot, clearAllSlots,
+  upsertCoverageSlot, deleteCoverageSlot, clearAllSlots, bulkUpsertSlots,
   copyDaySlots, loadCoverageTemplate, generateSlotsForDay, copySlotsBetweenTemplates
 } from '@/server/actions/coverage'
 import {
@@ -1165,11 +1165,16 @@ function SlotModal({ slot, defaultDay, defaultTime, locationId, organizationId, 
               )
             })}
           </div>
-          {!isEdit && form.days.length > 1 && (
-            <p className="text-[10px] text-indigo-600 mt-1.5">
-              Se crearán {form.days.length} slots (uno por día seleccionado)
-            </p>
-          )}
+          {!isEdit && form.days.length > 0 && (() => {
+            const [sh, sm] = form.startTime.split(':').map(Number)
+            const [eh, em] = form.endTime === '00:00' ? [24, 0] : form.endTime.split(':').map(Number)
+            const franjas = Math.max(0, Math.ceil(((eh * 60 + em) - (sh * 60 + sm)) / 30))
+            return franjas > 0 ? (
+              <p className="text-[10px] text-indigo-600 mt-1.5">
+                Se aplicará a {franjas * form.days.length} franjas de 30 min ({form.days.length} día{form.days.length !== 1 ? 's' : ''} × {franjas} franja{franjas !== 1 ? 's' : ''}). Las existentes se actualizarán.
+              </p>
+            ) : null
+          })()}
         </Field>
         <Field label="Horario">
           <div className="grid grid-cols-2 gap-3">
@@ -1260,25 +1265,26 @@ function SlotModal({ slot, defaultDay, defaultTime, locationId, organizationId, 
               toast.success('Slot actualizado ✓')
             } else {
               if (form.days.length === 0) { toast.error('Selecciona al menos un día'); return }
-              // Crear secuencialmente para evitar límites de concurrencia
-              for (const day of form.days) {
-                await upsertCoverageSlot({
-                  id: undefined,
-                  locationId,
-                  organizationId,
-                  templateId,
-                  dayOfWeek: day,
-                  startTime: form.startTime,
-                  endTime: form.endTime,
-                  minWorkers: form.minWorkers,
-                  idealWorkers: form.idealWorkers,
-                  laborRoleId: form.laborRoleId || null,
-                  skillId: form.skillId || null,
-                  isRequired: form.isRequired,
-                  notes: form.notes,
-                })
-              }
-              toast.success(form.days.length === 1 ? 'Slot creado ✓' : `${form.days.length} slots creados ✓`)
+              // Una sola llamada: expande el rango en franjas de 30min y
+              // actualiza las existentes / crea las que falten, para todos los días
+              const result = await bulkUpsertSlots({
+                locationId,
+                organizationId,
+                templateId,
+                days: form.days,
+                startTime: form.startTime,
+                endTime: form.endTime,
+                minWorkers: form.minWorkers,
+                idealWorkers: form.idealWorkers,
+                laborRoleId: form.laborRoleId || null,
+                skillId: form.skillId || null,
+                isRequired: form.isRequired,
+                notes: form.notes,
+              })
+              const parts = []
+              if (result.updated > 0) parts.push(`${result.updated} actualizados`)
+              if (result.created > 0) parts.push(`${result.created} creados`)
+              toast.success(`Slots: ${parts.join(' · ') || 'sin cambios'} ✓`)
             }
             onSaved()
           } catch (e: any) { toast.error(e.message) }

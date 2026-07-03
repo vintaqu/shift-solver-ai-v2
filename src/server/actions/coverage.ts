@@ -272,6 +272,107 @@ export async function copySlotsBetweenTemplates(
   return { copied: source.length }
 }
 
+// ── Upsert masivo: expande un rango horario en franjas de 30min ───────────
+// para varios días y actualiza/crea cada franja en una sola llamada
+export async function bulkUpsertSlots(data: {
+  locationId: string
+  organizationId: string
+  templateId?: string | null
+  days: number[]
+  startTime: string
+  endTime: string
+  minWorkers: number
+  idealWorkers: number
+  laborRoleId?: string | null
+  skillId?: string | null
+  isRequired: boolean
+  notes?: string
+}) {
+  const templateIdFilter = data.templateId ?? null
+
+  // Expandir el rango en franjas de 30 min
+  const [sh, sm] = data.startTime.split(':').map(Number)
+  const [eh, em] = data.endTime === '00:00' ? [24, 0] : data.endTime.split(':').map(Number)
+  const startMin = sh * 60 + sm
+  const endMin = eh * 60 + em
+
+  if (endMin <= startMin) throw new Error('La hora de fin debe ser posterior a la de inicio')
+
+  const franjas: Array<{ start: string; end: string }> = []
+  for (let cur = startMin; cur < endMin; cur += 30) {
+    const next = Math.min(cur + 30, endMin)
+    const fmt = (m: number) => {
+      const mm = m >= 24 * 60 ? m - 24 * 60 : m
+      return `${String(Math.floor(mm / 60)).padStart(2, '0')}:${String(mm % 60).padStart(2, '0')}`
+    }
+    franjas.push({ start: fmt(cur), end: fmt(next) })
+  }
+
+  // Obtener slots existentes de esos días en una sola query
+  const existing = await prisma.coverageRequirement.findMany({
+    where: {
+      locationId: data.locationId,
+      templateId: templateIdFilter,
+      dayOfWeek: { in: data.days },
+      startTime: { in: franjas.map(f => f.start) },
+    },
+  })
+
+  const existingMap = new Map(existing.map(s => [`${s.dayOfWeek}|${s.startTime}`, s]))
+
+  const toCreate: any[] = []
+  const toUpdate: string[] = []
+
+  for (const day of data.days) {
+    for (const f of franjas) {
+      const key = `${day}|${f.start}`
+      const found = existingMap.get(key)
+      if (found) {
+        toUpdate.push(found.id)
+      } else {
+        toCreate.push({
+          locationId: data.locationId,
+          organizationId: data.organizationId,
+          templateId: templateIdFilter,
+          dayOfWeek: day,
+          startTime: f.start,
+          endTime: f.end,
+          minWorkers: data.minWorkers,
+          idealWorkers: data.idealWorkers,
+          laborRoleId: data.laborRoleId || null,
+          skillId: data.skillId || null,
+          isRequired: data.isRequired,
+          notes: data.notes || null,
+          priority: 1,
+        })
+      }
+    }
+  }
+
+  // Actualizar existentes en bulk
+  if (toUpdate.length > 0) {
+    await prisma.coverageRequirement.updateMany({
+      where: { id: { in: toUpdate } },
+      data: {
+        minWorkers: data.minWorkers,
+        idealWorkers: data.idealWorkers,
+        laborRoleId: data.laborRoleId || null,
+        skillId: data.skillId || null,
+        isRequired: data.isRequired,
+        notes: data.notes || null,
+      },
+    })
+  }
+
+  // Crear nuevos en bulk
+  if (toCreate.length > 0) {
+    await prisma.coverageRequirement.createMany({ data: toCreate })
+  }
+
+  revalidatePath('/coverage')
+  return { updated: toUpdate.length, created: toCreate.length }
+}
+
 // ── Generar slots de 30min automáticamente para un rango ──────────────────
 export async function generateSlotsForDay(
   locationId: string,
