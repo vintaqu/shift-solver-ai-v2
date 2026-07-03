@@ -322,48 +322,6 @@ export function PlannerClientPage({ period, employees, weekDays, allPeriods, abs
         </div>
       </header>
 
-      {/* ══════════ MÉTRICAS RÁPIDAS ══════════ */}
-      <div className="flex-shrink-0 flex gap-2 px-5 py-2.5 bg-white border-b border-gray-100">
-        {weekDays.map((dayIso, i) => {
-          const cov = dayCoverage(i)
-          const day = parseISO(dayIso)
-          const today = isToday(day)
-          const totalH = employees.reduce((acc, e) =>
-            acc + (assignmentsByEmpDay[e.id]?.[i] || []).reduce((s: number, a: any) =>
-              s + durationH(a.startTime, a.endTime, a.breakMinutes), 0), 0)
-          return (
-            <div key={i} className={cn(
-              'flex-1 rounded-xl px-3 py-2 border text-center transition-all',
-              today ? 'bg-indigo-50 border-indigo-200' : 'bg-gray-50 border-gray-200'
-            )}>
-              <div className={cn('text-[11px] font-semibold', today ? 'text-indigo-600' : 'text-gray-500')}>
-                {DAYS_SHORT[i]}
-                <span className={cn('ml-1 text-[10px] font-normal', today ? 'text-indigo-400' : 'text-gray-400')}>
-                  {format(day, 'd')}
-                </span>
-              </div>
-              <div className="flex items-center justify-center gap-1 mt-0.5">
-                <div className={cn(
-                  'text-[11px] font-bold',
-                  cov.ok ? 'text-emerald-600' : 'text-red-500'
-                )}>
-                  {cov.working}/{cov.required}
-                </div>
-              </div>
-              <div className="text-[10px] text-gray-400 mt-0.5">{fmtH(totalH)}</div>
-            </div>
-          )
-        })}
-        {/* Total semana */}
-        <div className="w-[90px] rounded-xl px-3 py-2 border border-indigo-200 bg-indigo-50 text-center">
-          <div className="text-[11px] font-semibold text-indigo-600">Total</div>
-          <div className="text-[15px] font-bold text-indigo-700">
-            {fmtH(employees.reduce((acc, e) => acc + empWeekHours(e.id), 0))}
-          </div>
-          <div className="text-[10px] text-indigo-400">{employees.length} empleados</div>
-        </div>
-      </div>
-
       {/* ══════════ GRID ══════════ */}
       <div className="flex-1 overflow-auto px-5 py-4">
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden min-w-[900px]">
@@ -377,6 +335,9 @@ export function PlannerClientPage({ period, employees, weekDays, allPeriods, abs
               const day = parseISO(dayIso)
               const today = isToday(day)
               const cov = dayCoverage(i)
+              const totalH = employees.reduce((acc, e) =>
+                acc + (assignmentsByEmpDay[e.id]?.[i] || []).reduce((s: number, a: any) =>
+                  s + durationH(a.startTime, a.endTime, a.breakMinutes), 0), 0)
               return (
                 <div key={i} className={cn(
                   'px-2 py-3 border-r border-gray-200 text-center',
@@ -401,12 +362,16 @@ export function PlannerClientPage({ period, employees, weekDays, allPeriods, abs
                       ✓ {cov.working}
                     </div>
                   )}
+                  <div className="text-[10px] text-gray-400 mt-0.5">{fmtH(totalH)}</div>
                 </div>
               )
             })}
-            <div className="px-2 py-3 bg-gray-50 text-center">
-              <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Horas</span>
-              <div className="text-[9px] text-gray-300 mt-0.5">brutas / netas</div>
+            <div className="px-2 py-3 bg-indigo-50 text-center">
+              <span className="text-[11px] font-semibold text-indigo-600">Total</span>
+              <div className="text-[13px] font-bold text-indigo-700 mt-0.5">
+                {fmtH(employees.reduce((acc, e) => acc + empWeekHours(e.id), 0))}
+              </div>
+              <div className="text-[9px] text-indigo-400 mt-0.5">{employees.length} empl.</div>
             </div>
           </div>
 
