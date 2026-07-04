@@ -40,7 +40,7 @@ export default async function PlanningWeekPage({ params }: { params: { id: strin
       contracts: { where: { isActive: true }, take: 1 },
       skills: { include: { skill: true } },
     },
-    orderBy: [{ displayOrder: 'asc' }, { firstName: 'asc' }],
+    orderBy: [{ displayOrder: 'asc' }, { firstName: 'asc' }] as any,
   })
 
   // Semanas disponibles para el navegador
