@@ -232,7 +232,6 @@ model Employee {
   // Marco legal aplicable
   legalFrameworkId     String?  // null = usa el de la organización
   skipLegalValidation  Boolean  @default(false)  // true = dueño/socio sin validación
-  displayOrder         Int      @default(0)       // orden en el cuadrante semanal
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
@@ -430,8 +429,10 @@ model CoverageTemplate {
   // MANUAL: fecha de fin opcional (null = indefinido)
   activeUntil      DateTime?
   // SCHEDULED: rango anual recurrente (día/mes)
-  scheduledFrom    DateTime?  // fecha inicio activación
-  scheduledTo      DateTime?  // fecha fin activación
+  schedStartMonth  Int?     // 1-12
+  schedStartDay    Int?     // 1-31
+  schedEndMonth    Int?     // 1-12
+  schedEndDay      Int?     // 1-31
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -450,7 +451,8 @@ model CoverageRequirement {
   organizationId String
   locationId     String
   templateId     String?  // null = sin plantilla (legacy)
-  dayOfWeek      Int      // 0=Lun, 6=Dom
+  dayOfWeek      Int      // 0=Lun, 6=Dom (en slots por fecha, derivado de `date`)
+  date           DateTime? // fecha concreta — null = patrón semanal de plantilla
   startTime      String   // "06:00"
   endTime        String   // "06:30"
   laborRoleId    String?
@@ -470,6 +472,7 @@ model CoverageRequirement {
 
   @@index([locationId])
   @@index([locationId, dayOfWeek])
+  @@index([locationId, date])
 }
 
 // ============================================================
