@@ -25,7 +25,7 @@ export default async function EmployeesPage() {
         },
         _count: { select: { assignments: true, absences: true } },
       },
-      orderBy: [{ isActive: 'desc' }, { displayOrder: 'asc' }, { firstName: 'asc' }],
+      orderBy: [{ isActive: 'desc' }, { firstName: 'asc' }] as any,
     }),
     prisma.skill.findMany({ where: { organizationId } }),
     prisma.laborRole.findMany({ where: { organizationId }, orderBy: { priority: 'asc' } }),
