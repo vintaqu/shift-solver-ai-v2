@@ -367,6 +367,52 @@ export async function bulkUpsertDateSlots(data: {
   return { updated: toUpdate.length, created: toCreate.length }
 }
 
+// ── Regenerar semana desde la plantilla activa (forzado, sobreescribe) ─────
+export async function regenerateWeekFromTemplate(
+  locationId: string,
+  organizationId: string,
+  weekStartISO: string,
+) {
+  const weekStart = toUTCDate(weekStartISO)
+  const weekEnd = addDaysUTC(weekStart, 7)
+
+  const activeTemplate = await prisma.coverageTemplate.findFirst({
+    where: { locationId, isActive: true },
+  })
+  if (!activeTemplate) throw new Error('No hay ninguna plantilla activa')
+
+  const templateSlots = await prisma.coverageRequirement.findMany({
+    where: { locationId, templateId: activeTemplate.id, date: null },
+  })
+  if (templateSlots.length === 0) throw new Error('La plantilla activa no tiene slots configurados')
+
+  await prisma.coverageRequirement.deleteMany({
+    where: { locationId, date: { gte: weekStart, lt: weekEnd } },
+  })
+
+  await prisma.coverageRequirement.createMany({
+    data: templateSlots.map(s => ({
+      locationId,
+      organizationId,
+      templateId: activeTemplate.id,
+      dayOfWeek: s.dayOfWeek,
+      date: addDaysUTC(weekStart, s.dayOfWeek),
+      startTime: s.startTime,
+      endTime: s.endTime,
+      minWorkers: s.minWorkers,
+      idealWorkers: s.idealWorkers,
+      laborRoleId: s.laborRoleId,
+      skillId: s.skillId,
+      isRequired: s.isRequired,
+      notes: s.notes,
+      priority: s.priority,
+    })),
+  })
+
+  revalidatePath('/coverage')
+  return { count: templateSlots.length, templateName: activeTemplate.name }
+}
+
 // ── Borrar toda la cobertura de una semana ──────────────────────────────────
 export async function clearWeekCoverage(locationId: string, weekStartISO: string) {
   const weekStart = toUTCDate(weekStartISO)

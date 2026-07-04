@@ -2,52 +2,46 @@ export const dynamic = 'force-dynamic'
 
 import { prisma } from '@/lib/prisma'
 import { requireOrgContext } from '@/lib/session'
-import { CoverageClient } from '@/components/coverage/CoverageClient'
-import { migrateLegacySlotsToDefault, getTemplatesForLocation } from '@/server/actions/coverageTemplates'
+import { ensureWeekCoverage, getWeekCoverage } from '@/server/actions/coverageWeekly'
+import { CoverageWeeklyClient } from '@/components/coverage/CoverageWeeklyClient'
 
-export default async function CoveragePage({ searchParams }: { searchParams: { template?: string } }) {
+// Lunes de la semana ISO que contiene `d`
+function mondayOf(d: Date): Date {
+  const day = (d.getUTCDay() + 6) % 7 // 0=Lun ... 6=Dom
+  const monday = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()))
+  monday.setUTCDate(monday.getUTCDate() - day)
+  return monday
+}
+
+export default async function CoveragePage({ searchParams }: { searchParams: { week?: string } }) {
   const ctx = await requireOrgContext()
   const { organizationId, locationId } = ctx
 
-  // Migrar slots legacy si existen (idempotente)
-  await migrateLegacySlotsToDefault(locationId, organizationId)
+  const weekStart = searchParams.week
+    ? mondayOf(new Date(searchParams.week + 'T00:00:00Z'))
+    : mondayOf(new Date())
+  const weekStartISO = weekStart.toISOString().slice(0, 10)
 
-  const [templates, roles, skills] = await Promise.all([
-    getTemplatesForLocation(locationId),
-    prisma.laborRole.findMany({
-      where: { organizationId },
-      orderBy: { priority: 'asc' },
-    }),
-    prisma.skill.findMany({
-      where: { organizationId },
-    }),
+  // Garantiza que la semana tiene cobertura (hereda de la anterior o de la plantilla)
+  const inheritance = await ensureWeekCoverage(locationId, organizationId, weekStartISO)
+
+  const [slots, roles, skills, activeTemplate] = await Promise.all([
+    getWeekCoverage(locationId, weekStartISO),
+    prisma.laborRole.findMany({ where: { organizationId }, orderBy: { priority: 'asc' } }),
+    prisma.skill.findMany({ where: { organizationId } }),
+    prisma.coverageTemplate.findFirst({ where: { locationId, isActive: true } }),
   ])
 
-  // Determinar plantilla seleccionada — query param > activa > default > primera
-  const requestedTemplate = searchParams.template
-    ? templates.find(t => t.id === searchParams.template)
-    : null
-  const activeTemplate = requestedTemplate
-    ?? templates.find(t => t.isActive)
-    ?? templates.find(t => t.isDefault)
-    ?? templates[0]
-
-  // Cargar slots de la plantilla activa
-  const slots = activeTemplate ? await prisma.coverageRequirement.findMany({
-    where: { templateId: activeTemplate.id },
-    include: { laborRole: true, skill: true },
-    orderBy: [{ dayOfWeek: 'asc' }, { startTime: 'asc' }],
-  }) : []
-
   return (
-    <CoverageClient
-      templates={JSON.parse(JSON.stringify(templates))}
-      initialTemplateId={activeTemplate?.id ?? null}
-      initialSlots={JSON.parse(JSON.stringify(slots))}
+    <CoverageWeeklyClient
+      weekStartISO={weekStartISO}
+      slots={JSON.parse(JSON.stringify(slots))}
       roles={JSON.parse(JSON.stringify(roles))}
       skills={JSON.parse(JSON.stringify(skills))}
       locationId={locationId}
       organizationId={organizationId}
+      inheritance={inheritance}
+      activeTemplateName={activeTemplate?.name ?? null}
     />
   )
 }
