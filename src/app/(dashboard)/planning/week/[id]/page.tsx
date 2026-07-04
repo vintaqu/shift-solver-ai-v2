@@ -5,6 +5,7 @@ import { addDays } from 'date-fns'
 import { prisma } from '@/lib/prisma'
 import { requireOrgContext } from '@/lib/session'
 import { PlannerClientPage } from '@/components/planning/PlannerClientPage'
+import { ensureWeekCoverage, getWeekCoverage } from '@/server/actions/coverageWeekly'
 
 export default async function PlanningWeekPage({ params }: { params: { id: string } }) {
   const ctx = await requireOrgContext()
@@ -52,6 +53,11 @@ export default async function PlanningWeekPage({ params }: { params: { id: strin
   })
 
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(new Date(period.weekStart), i))
+  const weekStartISO = new Date(period.weekStart).toISOString().slice(0, 10)
+
+  // Cobertura de la semana — hereda automáticamente de la semana anterior o de la plantilla
+  await ensureWeekCoverage(period.locationId, period.organizationId, weekStartISO)
+  const coverageSlots = await getWeekCoverage(period.locationId, weekStartISO)
 
   // Ausencias aprobadas que solapan con esta semana (para avisos en el grid)
   const absences = await prisma.absenceRequest.findMany({
@@ -74,6 +80,8 @@ export default async function PlanningWeekPage({ params }: { params: { id: strin
       weekDays={weekDays.map(d => d.toISOString())}
       allPeriods={JSON.parse(JSON.stringify(allPeriods))}
       absences={JSON.parse(JSON.stringify(absences))}
+      coverageSlots={JSON.parse(JSON.stringify(coverageSlots))}
+      weekStartISO={weekStartISO}
     />
   )
 }

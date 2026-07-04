@@ -9,7 +9,8 @@ import {
   ChevronLeft, ChevronRight, Sparkles, Send, Plus,
   Lock, Unlock, Trash2, AlertTriangle, AlertCircle,
   CheckCircle, Info, Clock, User, BarChart2, X,
-  Copy, RotateCcw, Download, Eye, Loader2, FileSpreadsheet
+  Copy, RotateCcw, Download, Eye, Loader2, FileSpreadsheet,
+  Users, ChevronDown, ChevronUp,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { createAssignment, updateAssignment, moveAssignment, deleteAssignment, toggleAssignmentLock, publishPlanningPeriod } from '@/server/actions/planning'
@@ -81,6 +82,8 @@ interface Props {
   weekDays: string[]  // ISO strings
   allPeriods: any[]
   absences?: AbsenceBlock[]
+  coverageSlots?: any[]   // cobertura por fecha de la semana visible
+  weekStartISO?: string
 }
 
 interface EditorState {
@@ -94,11 +97,12 @@ interface EditorState {
 // ═════════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ═════════════════════════════════════════════════════════════════════════════
-export function PlannerClientPage({ period, employees, weekDays, allPeriods, absences = [] }: Props) {
+export function PlannerClientPage({ period, employees, weekDays, allPeriods, absences = [], coverageSlots = [], weekStartISO }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [editor, setEditor] = useState<EditorState>({ open: false, mode: 'create' })
   const [showSummary, setShowSummary] = useState(false)
+  const [showCoverage, setShowCoverage] = useState(true)
   const [showWeekPicker, setShowWeekPicker] = useState(false)
   // ── Drag & Drop turnos ──
   const [draggedAssignment, setDraggedAssignment] = useState<{ id: string; empId: string; dayIdx: number } | null>(null)
@@ -161,14 +165,41 @@ export function PlannerClientPage({ period, employees, weekDays, allPeriods, abs
       acc + (a.breakMinutes || 0), 0)
   }
 
-  // Cobertura por día
+  // Cobertura por día — usa la cobertura real por FECHA (Fase 2/3), no el patrón dayOfWeek de plantilla
+  const coverageByDate: Record<string, any[]> = {}
+  for (const s of coverageSlots) {
+    const key = (s.date as string).slice(0, 10)
+    if (!coverageByDate[key]) coverageByDate[key] = []
+    coverageByDate[key].push(s)
+  }
+
+  function dateISOForDay(dayIdx: number): string {
+    return new Date(weekDays[dayIdx]).toISOString().slice(0, 10)
+  }
+
   function dayCoverage(dayIdx: number) {
-    const reqs = period.location.coverageRequirements.filter((r: any) => r.dayOfWeek === dayIdx)
+    const reqs = coverageByDate[dateISOForDay(dayIdx)] || []
     const maxReq = reqs.length > 0 ? Math.max(...reqs.map((r: any) => r.minWorkers)) : 0
     const working = employees.filter(e =>
       (assignmentsByEmpDay[e.id]?.[dayIdx] || []).length > 0
     ).length
     return { working, required: maxReq, ok: working >= maxReq }
+  }
+
+  // Cobertura franja-a-franja de un día: para cada slot de cobertura, cuenta empleados asignados que cubren esa franja
+  function franjaCoverage(dayIdx: number) {
+    const dateISO = dateISOForDay(dayIdx)
+    const reqs = (coverageByDate[dateISO] || []).slice().sort((a, b) => a.startTime.localeCompare(b.startTime))
+    const dayAssignments = employees.flatMap(e => assignmentsByEmpDay[e.id]?.[dayIdx] || [])
+    return reqs.map((r: any) => {
+      const reqStart = timeToMin(r.startTime)
+      const assigned = dayAssignments.filter((a: any) => {
+        const aStart = timeToMin(a.startTime)
+        const aEnd = a.endTime === '00:00' ? 24 * 60 : timeToMin(a.endTime)
+        return reqStart >= aStart && reqStart < aEnd
+      }).length
+      return { ...r, assigned }
+    })
   }
 
   // Total alertas
@@ -282,6 +313,15 @@ export function PlannerClientPage({ period, employees, weekDays, allPeriods, abs
             </div>
           )}
           <button
+            onClick={() => setShowCoverage(v => !v)}
+            className={cn(
+              'flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[12px] font-medium transition-colors',
+              showCoverage ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+            )}
+          >
+            <Users size={13} /> Cobertura {showCoverage ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+          </button>
+          <button
             onClick={() => setShowSummary(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-600 text-[12px] font-medium hover:bg-gray-50 transition-colors"
           >
@@ -374,6 +414,50 @@ export function PlannerClientPage({ period, employees, weekDays, allPeriods, abs
               <div className="text-[9px] text-indigo-400 mt-0.5">{employees.length} empl.</div>
             </div>
           </div>
+
+          {/* Fila de cobertura — heatmap de franjas requeridas vs cubiertas */}
+          {showCoverage && (
+            <div className="grid border-b border-gray-200 bg-gray-50/50" style={{ gridTemplateColumns: '200px repeat(7, 1fr) 88px' }}>
+              <div className="px-4 py-2.5 border-r border-gray-200 flex items-center gap-1.5">
+                <Users size={12} className="text-gray-400" />
+                <span className="text-[11px] font-semibold text-gray-500">Cobertura</span>
+              </div>
+              {weekDays.map((_, dayIdx) => {
+                const franjas = franjaCoverage(dayIdx)
+                if (franjas.length === 0) {
+                  return (
+                    <div key={dayIdx} className="px-2 py-2.5 border-r border-gray-100 flex items-center justify-center">
+                      <span className="text-[10px] text-gray-300 italic">sin configurar</span>
+                    </div>
+                  )
+                }
+                return (
+                  <div key={dayIdx} className="px-2 py-2 border-r border-gray-100 flex flex-wrap gap-[2px] content-start items-start">
+                    {franjas.map((f: any, i: number) => {
+                      const ok = f.assigned >= f.minWorkers
+                      const zero = f.assigned === 0 && f.minWorkers > 0
+                      const color = f.minWorkers === 0 ? '#e5e7eb' : ok ? '#22c55e' : zero ? '#ef4444' : '#f59e0b'
+                      return (
+                        <div key={i}
+                          title={`${f.startTime}–${f.endTime}: ${f.assigned}/${f.minWorkers}`}
+                          className="w-[7px] h-[14px] rounded-[2px]"
+                          style={{ backgroundColor: color }}
+                        />
+                      )
+                    })}
+                  </div>
+                )
+              })}
+              <div className="px-2 py-2.5 flex items-center justify-center">
+                <button
+                  onClick={() => router.push(`/coverage${weekStartISO ? `?week=${weekStartISO}` : ''}`)}
+                  className="text-[10px] font-semibold text-indigo-600 hover:text-indigo-700 hover:underline"
+                >
+                  Editar →
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Filas empleados */}
           {sortedEmployees.map((emp: any) => {
