@@ -231,7 +231,7 @@ export async function updateEmployeeOrder(orderedIds: string[]) {
 
   await Promise.all(
     orderedIds.map((id, index) =>
-      prisma.employee.update({ where: { id }, data: { displayOrder: index } })
+      prisma.employee.update({ where: { id }, data: { displayOrder: index } as any })
     )
   )
 
