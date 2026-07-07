@@ -15,6 +15,7 @@ import {
 import { cn } from '@/lib/utils'
 import { createAssignment, updateAssignment, moveAssignment, deleteAssignment, toggleAssignmentLock, publishPlanningPeriod } from '@/server/actions/planning'
 import { updateEmployeeOrder } from '@/server/actions/employees'
+import { upsertDateSlot, deleteDateSlot } from '@/server/actions/coverageWeekly'
 import { GenerateModal } from './GenerateModal'
 
 // ─── Paleta de colores por empleado ───────────────────────────────────────────
@@ -41,6 +42,15 @@ const DAYS_ES = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'
 const DAYS_SHORT = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+function demandColor(min: number): { bg: string; text: string } {
+  if (min === 0) return { bg: '#f9fafb', text: '#9ca3af' }
+  if (min === 1) return { bg: '#f0fdf4', text: '#166534' }
+  if (min === 2) return { bg: '#eff6ff', text: '#1e40af' }
+  if (min === 3) return { bg: '#fefce8', text: '#854d0e' }
+  if (min === 4) return { bg: '#fff7ed', text: '#9a3412' }
+  return { bg: '#fef2f2', text: '#991b1b' }
+}
+
 function timeToMin(t: string) {
   const [h, m] = t.split(':').map(Number)
   return h * 60 + (m || 0)
@@ -103,6 +113,8 @@ export function PlannerClientPage({ period, employees, weekDays, allPeriods, abs
   const [editor, setEditor] = useState<EditorState>({ open: false, mode: 'create' })
   const [showSummary, setShowSummary] = useState(false)
   const [showCoverage, setShowCoverage] = useState(true)
+  const [coverageExpanded, setCoverageExpanded] = useState(false)
+  const [quickEditSlot, setQuickEditSlot] = useState<{ date: string; time: string; slot: any | null } | null>(null)
   const [showWeekPicker, setShowWeekPicker] = useState(false)
   // ── Drag & Drop turnos ──
   const [draggedAssignment, setDraggedAssignment] = useState<{ id: string; empId: string; dayIdx: number } | null>(null)
@@ -708,7 +720,7 @@ export function PlannerClientPage({ period, employees, weekDays, allPeriods, abs
           </div>
         </div>
 
-        {/* ══════════ COBERTURA SEMANAL — resumen debajo del cuadro ══════════ */}
+        {/* ══════════ COBERTURA SEMANAL — resumen + edición inline ══════════ */}
         {showCoverage && (
           <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden min-w-[900px] mt-3">
             <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100 bg-gray-50">
@@ -716,12 +728,22 @@ export function PlannerClientPage({ period, employees, weekDays, allPeriods, abs
                 <Users size={13} className="text-gray-400" />
                 <span className="text-[12px] font-semibold text-gray-600">Cobertura de la semana</span>
               </div>
-              <button
-                onClick={() => router.push(`/coverage${weekStartISO ? `?week=${weekStartISO}` : ''}`)}
-                className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-700 hover:underline"
-              >
-                Editar cobertura →
-              </button>
+              <div className="flex items-center gap-3">
+                {coverageExpanded && (
+                  <button
+                    onClick={() => router.push(`/coverage${weekStartISO ? `?week=${weekStartISO}` : ''}`)}
+                    className="text-[11px] font-medium text-gray-400 hover:text-indigo-600 hover:underline"
+                  >
+                    Editor completo ↗
+                  </button>
+                )}
+                <button
+                  onClick={() => setCoverageExpanded(v => !v)}
+                  className="flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-700"
+                >
+                  {coverageExpanded ? <>Ocultar edición <ChevronUp size={13} /></> : <>Editar cobertura <ChevronDown size={13} /></>}
+                </button>
+              </div>
             </div>
             <div className="grid" style={{ gridTemplateColumns: '200px repeat(7, 1fr) 88px' }}>
               <div className="px-4 py-3 border-r border-gray-100" />
@@ -756,6 +778,61 @@ export function PlannerClientPage({ period, employees, weekDays, allPeriods, abs
               })}
               <div className="px-2 py-3" />
             </div>
+
+            {/* ── Editor inline desplegable ── */}
+            {coverageExpanded && (() => {
+              const allTimes = Array.from(new Set(
+                Object.values(coverageByDate).flat().map((s: any) => s.startTime)
+              )).sort()
+
+              if (allTimes.length === 0) {
+                return (
+                  <div className="px-4 py-6 text-center border-t border-gray-100">
+                    <p className="text-[12px] text-gray-400">Esta semana no tiene franjas de cobertura configuradas.</p>
+                    <button
+                      onClick={() => router.push(`/coverage${weekStartISO ? `?week=${weekStartISO}` : ''}`)}
+                      className="mt-2 text-[12px] font-semibold text-indigo-600 hover:underline"
+                    >
+                      Configurar desde el editor completo →
+                    </button>
+                  </div>
+                )
+              }
+
+              return (
+                <div className="border-t border-gray-200 max-h-[360px] overflow-y-auto">
+                  {allTimes.map(time => (
+                    <div key={time} className="grid border-b border-gray-100" style={{ gridTemplateColumns: '200px repeat(7, 1fr) 88px' }}>
+                      <div className="px-4 py-1.5 text-[11px] text-gray-400 font-mono border-r border-gray-100 flex items-center">{time}</div>
+                      {weekDays.map((dayIso, dayIdx) => {
+                        const dateISO = dateISOForDay(dayIdx)
+                        const slot = (coverageByDate[dateISO] || []).find((s: any) => s.startTime === time)
+                        const colors = slot ? demandColor(slot.minWorkers) : null
+                        return (
+                          <div key={dayIdx}
+                            className="border-r border-gray-100 p-0.5 cursor-pointer group/qcell"
+                            onClick={() => setQuickEditSlot({ date: dateISO, time, slot: slot ?? null })}
+                          >
+                            {slot ? (
+                              <div className="rounded-md px-1.5 py-1 flex items-center justify-center gap-0.5 text-[11px] font-bold hover:ring-2 hover:ring-indigo-300 transition-all"
+                                style={{ backgroundColor: colors!.bg, color: colors!.text }}>
+                                {slot.minWorkers}
+                                {slot.idealWorkers > slot.minWorkers && <span className="text-[9px] opacity-60">/{slot.idealWorkers}</span>}
+                              </div>
+                            ) : (
+                              <div className="rounded-md py-1 flex items-center justify-center opacity-0 group-hover/qcell:opacity-100 transition-opacity">
+                                <Plus size={11} className="text-gray-300" />
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                      <div />
+                    </div>
+                  ))}
+                </div>
+              )
+            })()}
           </div>
         )}
 
@@ -771,6 +848,19 @@ export function PlannerClientPage({ period, employees, weekDays, allPeriods, abs
       </div>
 
       {/* ══════════ MODALES ══════════ */}
+
+      {/* Edición rápida de un slot de cobertura (desde el editor inline) */}
+      {quickEditSlot && (
+        <QuickCoverageEditModal
+          date={quickEditSlot.date}
+          time={quickEditSlot.time}
+          slot={quickEditSlot.slot}
+          locationId={period.locationId}
+          organizationId={period.organizationId}
+          onClose={() => setQuickEditSlot(null)}
+          onSaved={() => { setQuickEditSlot(null); router.refresh() }}
+        />
+      )}
 
       {/* Editor de turno */}
       {editor.open && (
@@ -1368,4 +1458,110 @@ function SummaryModal({ employees, weekDays, assignmentsByEmpDay, empColorMap, i
       </div>
     </div>
   )
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// QuickCoverageEditModal — edición rápida de un slot de cobertura desde el planner
+// ═════════════════════════════════════════════════════════════════════════════
+function QuickCoverageEditModal({ date, time, slot, locationId, organizationId, onClose, onSaved }: any) {
+  const [isPending, startTransition] = useTransition()
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const isEdit = !!slot
+  const [min, setMin] = useState(slot?.minWorkers ?? 2)
+  const [ideal, setIdeal] = useState(slot?.idealWorkers ?? 2)
+  const [isRequired, setIsRequired] = useState(slot?.isRequired ?? true)
+  const colors = demandColor(min)
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-[340px]" onClick={e => e.stopPropagation()}>
+        <div className="px-5 py-3.5 border-b border-gray-100" style={{ background: 'linear-gradient(135deg,#eef2ff,#f5f3ff)' }}>
+          <h3 className="text-[13px] font-bold text-gray-900">{isEdit ? 'Editar franja' : 'Nueva franja'}</h3>
+          <p className="text-[11px] text-gray-500 mt-0.5">{date} · {time}</p>
+        </div>
+
+        <div className="px-5 py-4 space-y-4">
+          <div className="flex gap-6 justify-center">
+            <div className="text-center">
+              <div className="text-[10px] text-gray-400 mb-1.5">Mínimo</div>
+              <div className="flex items-center gap-1.5">
+                <button onClick={() => setMin(m => Math.max(0, m - 1))} className="w-7 h-7 rounded-lg bg-gray-100 font-bold hover:bg-gray-200">−</button>
+                <span className="text-[18px] font-bold w-7 text-center" style={{ color: colors.text }}>{min}</span>
+                <button onClick={() => setMin(m => m + 1)} className="w-7 h-7 rounded-lg bg-gray-100 font-bold hover:bg-gray-200">+</button>
+              </div>
+            </div>
+            <div className="text-center">
+              <div className="text-[10px] text-gray-400 mb-1.5">Ideal</div>
+              <div className="flex items-center gap-1.5">
+                <button onClick={() => setIdeal(i => Math.max(min, i - 1))} className="w-7 h-7 rounded-lg bg-gray-100 font-bold hover:bg-gray-200">−</button>
+                <span className="text-[18px] font-bold text-gray-800 w-7 text-center">{ideal}</span>
+                <button onClick={() => setIdeal(i => i + 1)} className="w-7 h-7 rounded-lg bg-gray-100 font-bold hover:bg-gray-200">+</button>
+              </div>
+            </div>
+          </div>
+
+          <div className={cn('flex items-center gap-2 p-2.5 rounded-xl border cursor-pointer transition-all', isRequired ? 'border-red-200 bg-red-50' : 'border-gray-200 bg-white')}
+            onClick={() => setIsRequired(v => !v)}>
+            <div className={cn('w-8 h-4 rounded-full transition-all relative flex-shrink-0', isRequired ? 'bg-red-500' : 'bg-gray-300')}>
+              <div className={cn('absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-all', isRequired ? 'left-4' : 'left-0.5')} />
+            </div>
+            <span className="text-[11px] font-medium text-gray-600">Slot obligatorio</span>
+          </div>
+        </div>
+
+        <div className="flex justify-between items-center px-5 py-3.5 border-t border-gray-100">
+          {confirmDelete ? (
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-red-600 font-medium">¿Eliminar?</span>
+              <button disabled={isPending} onClick={() => startTransition(async () => {
+                try { await deleteDateSlot(slot.id); toast.success('Franja eliminada'); onSaved() } catch (e: any) { toast.error(e.message) }
+              })} className="px-2.5 py-1 rounded-lg text-[11px] bg-red-600 text-white hover:bg-red-700 disabled:opacity-50">
+                Sí
+              </button>
+              <button onClick={() => setConfirmDelete(false)} className="px-2.5 py-1 rounded-lg text-[11px] text-gray-500 hover:bg-gray-100">No</button>
+            </div>
+          ) : (
+            <>
+              <button onClick={onClose} className="px-3 py-1.5 rounded-xl text-[12px] text-gray-500 hover:bg-gray-100">Cancelar</button>
+              {isEdit && (
+                <button onClick={() => setConfirmDelete(true)} className="text-[11px] text-red-500 hover:underline">Eliminar</button>
+              )}
+            </>
+          )}
+          {!confirmDelete && (
+            <button
+              disabled={isPending}
+              onClick={() => startTransition(async () => {
+                try {
+                  await upsertDateSlot({
+                    id: slot?.id,
+                    locationId, organizationId,
+                    dateISO: date,
+                    startTime: time,
+                    endTime: nextHalfHour(time),
+                    minWorkers: min, idealWorkers: ideal,
+                    isRequired,
+                  })
+                  toast.success(isEdit ? 'Franja actualizada ✓' : 'Franja creada ✓')
+                  onSaved()
+                } catch (e: any) { toast.error(e.message) }
+              })}
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-indigo-600 text-white text-[12px] font-semibold hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {isPending ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle size={13} />}
+              Guardar
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function nextHalfHour(time: string): string {
+  const [h, m] = time.split(':').map(Number)
+  const next = h * 60 + m + 30
+  if (next >= 24 * 60) return '00:00'
+  return `${String(Math.floor(next / 60)).padStart(2, '0')}:${String(next % 60).padStart(2, '0')}`
 }
