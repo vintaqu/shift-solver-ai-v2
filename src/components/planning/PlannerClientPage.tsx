@@ -415,50 +415,6 @@ export function PlannerClientPage({ period, employees, weekDays, allPeriods, abs
             </div>
           </div>
 
-          {/* Fila de cobertura — heatmap de franjas requeridas vs cubiertas */}
-          {showCoverage && (
-            <div className="grid border-b border-gray-200 bg-gray-50/50" style={{ gridTemplateColumns: '200px repeat(7, 1fr) 88px' }}>
-              <div className="px-4 py-2.5 border-r border-gray-200 flex items-center gap-1.5">
-                <Users size={12} className="text-gray-400" />
-                <span className="text-[11px] font-semibold text-gray-500">Cobertura</span>
-              </div>
-              {weekDays.map((_, dayIdx) => {
-                const franjas = franjaCoverage(dayIdx)
-                if (franjas.length === 0) {
-                  return (
-                    <div key={dayIdx} className="px-2 py-2.5 border-r border-gray-100 flex items-center justify-center">
-                      <span className="text-[10px] text-gray-300 italic">sin configurar</span>
-                    </div>
-                  )
-                }
-                return (
-                  <div key={dayIdx} className="px-2 py-2 border-r border-gray-100 flex flex-wrap gap-[2px] content-start items-start">
-                    {franjas.map((f: any, i: number) => {
-                      const ok = f.assigned >= f.minWorkers
-                      const zero = f.assigned === 0 && f.minWorkers > 0
-                      const color = f.minWorkers === 0 ? '#e5e7eb' : ok ? '#22c55e' : zero ? '#ef4444' : '#f59e0b'
-                      return (
-                        <div key={i}
-                          title={`${f.startTime}–${f.endTime}: ${f.assigned}/${f.minWorkers}`}
-                          className="w-[7px] h-[14px] rounded-[2px]"
-                          style={{ backgroundColor: color }}
-                        />
-                      )
-                    })}
-                  </div>
-                )
-              })}
-              <div className="px-2 py-2.5 flex items-center justify-center">
-                <button
-                  onClick={() => router.push(`/coverage${weekStartISO ? `?week=${weekStartISO}` : ''}`)}
-                  className="text-[10px] font-semibold text-indigo-600 hover:text-indigo-700 hover:underline"
-                >
-                  Editar →
-                </button>
-              </div>
-            </div>
-          )}
-
           {/* Filas empleados */}
           {sortedEmployees.map((emp: any) => {
             const col = empColorMap[emp.id]
@@ -751,6 +707,57 @@ export function PlannerClientPage({ period, employees, weekDays, allPeriods, abs
             })()}
           </div>
         </div>
+
+        {/* ══════════ COBERTURA SEMANAL — resumen debajo del cuadro ══════════ */}
+        {showCoverage && (
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden min-w-[900px] mt-3">
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100 bg-gray-50">
+              <div className="flex items-center gap-1.5">
+                <Users size={13} className="text-gray-400" />
+                <span className="text-[12px] font-semibold text-gray-600">Cobertura de la semana</span>
+              </div>
+              <button
+                onClick={() => router.push(`/coverage${weekStartISO ? `?week=${weekStartISO}` : ''}`)}
+                className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-700 hover:underline"
+              >
+                Editar cobertura →
+              </button>
+            </div>
+            <div className="grid" style={{ gridTemplateColumns: '200px repeat(7, 1fr) 88px' }}>
+              <div className="px-4 py-3 border-r border-gray-100" />
+              {weekDays.map((dayIso, dayIdx) => {
+                const day = parseISO(dayIso)
+                const franjas = franjaCoverage(dayIdx)
+                const total = franjas.length
+                const covered = franjas.filter((f: any) => f.assigned >= f.minWorkers).length
+                const deficit = total - covered
+                const statusColor = total === 0 ? 'text-gray-300'
+                  : deficit === 0 ? 'text-emerald-600'
+                  : covered === 0 ? 'text-red-500'
+                  : 'text-amber-600'
+                return (
+                  <div key={dayIdx} className="px-2 py-3 border-r border-gray-100 text-center">
+                    <div className="text-[11px] text-gray-400 mb-1">{DAYS_SHORT[dayIdx]} {format(day, 'd')}</div>
+                    {total === 0 ? (
+                      <span className="text-[11px] text-gray-300 italic">Sin configurar</span>
+                    ) : (
+                      <>
+                        <div className={cn('text-[15px] font-bold', statusColor)}>{covered}/{total}</div>
+                        <div className="text-[10px] text-gray-400">franjas cubiertas</div>
+                        {deficit > 0 && (
+                          <div className="text-[10px] text-red-500 font-medium mt-0.5 flex items-center justify-center gap-0.5">
+                            <AlertTriangle size={9} /> {deficit} sin cubrir
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )
+              })}
+              <div className="px-2 py-3" />
+            </div>
+          </div>
+        )}
 
         {/* Leyenda */}
         <div className="flex items-center gap-4 mt-3 px-1 flex-wrap">
