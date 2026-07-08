@@ -10,7 +10,7 @@ import {
   AlertCircle, AlertTriangle, CheckCircle, Clock,
   Users, BarChart2, Calendar, X, Loader2,
   Copy, Moon, TrendingUp, Eye, Pencil, Info,
-  CalendarDays, ArrowRight
+  CalendarDays, ArrowRight, Clock3,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { createPlanningPeriodForWeek, duplicateWeekToDate } from '@/server/actions/planningMonth'
@@ -224,10 +224,10 @@ export function MonthCalendarClient({ year, month, data, organizationId, locatio
               <CalendarDays size={13} /> Semana
             </button>
             <button
-              onClick={() => router.push(`/planning/annual/${year}`)}
+              onClick={() => router.push(`/planning/day/${new Date().toISOString().slice(0, 10)}`)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium text-gray-500 hover:text-gray-700 transition-colors"
             >
-              <BarChart2 size={13} /> Anual
+              <Clock3 size={13} /> Día
             </button>
           </div>
 

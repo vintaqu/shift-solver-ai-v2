@@ -257,6 +257,15 @@ export function PlannerClientPage({ period, employees, weekDays, allPeriods, abs
           {/* Tabs de temporalidad */}
           <div className="flex items-center bg-gray-100 rounded-xl p-1 border border-gray-200">
             <button
+              onClick={() => router.push(`/planning/day/${new Date(period.weekStart).toISOString().slice(0, 10)}`)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium text-gray-500 hover:text-gray-700 transition-colors"
+            >
+              <span className="text-[12px]">🕐</span> Día
+            </button>
+            <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold bg-white text-indigo-600 shadow-sm">
+              <span className="text-[12px]">📆</span> Semana
+            </button>
+            <button
               onClick={() => {
                 const ws = new Date(period.weekStart)
                 router.push(`/planning/month/${ws.getFullYear()}/${ws.getMonth() + 1}`)
@@ -264,15 +273,6 @@ export function PlannerClientPage({ period, employees, weekDays, allPeriods, abs
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium text-gray-500 hover:text-gray-700 transition-colors"
             >
               <span className="text-[12px]">📅</span> Mes
-            </button>
-            <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold bg-white text-indigo-600 shadow-sm">
-              <span className="text-[12px]">📆</span> Semana
-            </button>
-            <button
-              onClick={() => router.push(`/planning/annual/${new Date(period.weekStart).getFullYear()}`)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium text-gray-500 hover:text-gray-700 transition-colors"
-            >
-              <span className="text-[12px]">📊</span> Anual
             </button>
           </div>
 
