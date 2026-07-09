@@ -25,11 +25,16 @@ export default async function CoveragePage({ searchParams }: { searchParams: { w
   // Garantiza que la semana tiene cobertura (hereda de la anterior o de la plantilla)
   const inheritance = await ensureWeekCoverage(locationId, organizationId, weekStartISO)
 
-  const [slots, roles, skills, activeTemplate] = await Promise.all([
+  const [slots, roles, skills, activeTemplate, templates] = await Promise.all([
     getWeekCoverage(locationId, weekStartISO),
     prisma.laborRole.findMany({ where: { organizationId }, orderBy: { priority: 'asc' } }),
     prisma.skill.findMany({ where: { organizationId } }),
     prisma.coverageTemplate.findFirst({ where: { locationId, isActive: true } }),
+    prisma.coverageTemplate.findMany({
+      where: { locationId },
+      include: { _count: { select: { coverageRequirements: true } } },
+      orderBy: { createdAt: 'asc' },
+    }),
   ])
 
   return (
@@ -42,6 +47,10 @@ export default async function CoveragePage({ searchParams }: { searchParams: { w
       organizationId={organizationId}
       inheritance={inheritance}
       activeTemplateName={activeTemplate?.name ?? null}
+      templates={JSON.parse(JSON.stringify(templates.map(t => ({
+        id: t.id, name: t.name, description: t.description, color: t.color,
+        isActive: t.isActive, slotsCount: t._count.coverageRequirements,
+      }))))}
     />
   )
 }

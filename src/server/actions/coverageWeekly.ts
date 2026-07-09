@@ -413,6 +413,101 @@ export async function regenerateWeekFromTemplate(
   return { count: templateSlots.length, templateName: activeTemplate.name }
 }
 
+// ── Guardar la semana actual como plantilla reutilizable ───────────────────
+export async function saveWeekAsTemplate(
+  locationId: string,
+  organizationId: string,
+  weekStartISO: string,
+  options: { name: string; description?: string; color?: string },
+) {
+  const weekStart = toUTCDate(weekStartISO)
+  const weekEnd = addDaysUTC(weekStart, 7)
+
+  const weekSlots = await prisma.coverageRequirement.findMany({
+    where: { locationId, date: { gte: weekStart, lt: weekEnd } },
+  })
+  if (weekSlots.length === 0) throw new Error('Esta semana no tiene cobertura que guardar')
+
+  const template = await prisma.coverageTemplate.create({
+    data: {
+      organizationId,
+      locationId,
+      name: options.name,
+      description: options.description || null,
+      color: options.color || '#6366f1',
+      isActive: false,
+    } as any,
+  })
+
+  // Guardar el patrón semanal (dayOfWeek, sin fecha)
+  await prisma.coverageRequirement.createMany({
+    data: weekSlots.map(s => ({
+      locationId,
+      organizationId,
+      templateId: template.id,
+      dayOfWeek: s.dayOfWeek,
+      date: null,
+      startTime: s.startTime,
+      endTime: s.endTime,
+      minWorkers: s.minWorkers,
+      idealWorkers: s.idealWorkers,
+      laborRoleId: s.laborRoleId,
+      skillId: s.skillId,
+      isRequired: s.isRequired,
+      notes: s.notes,
+      priority: s.priority,
+    })),
+  })
+
+  revalidatePath('/coverage')
+  return { templateId: template.id, name: template.name, count: weekSlots.length }
+}
+
+// ── Importar una plantilla concreta a la semana actual (reemplaza) ─────────
+export async function importTemplateToWeek(
+  templateId: string,
+  locationId: string,
+  organizationId: string,
+  weekStartISO: string,
+) {
+  const weekStart = toUTCDate(weekStartISO)
+  const weekEnd = addDaysUTC(weekStart, 7)
+
+  const template = await prisma.coverageTemplate.findUnique({ where: { id: templateId } })
+  if (!template) throw new Error('Plantilla no encontrada')
+
+  const templateSlots = await prisma.coverageRequirement.findMany({
+    where: { locationId, templateId, date: null },
+  })
+  if (templateSlots.length === 0) throw new Error('La plantilla no tiene slots configurados')
+
+  await prisma.coverageRequirement.deleteMany({
+    where: { locationId, date: { gte: weekStart, lt: weekEnd } },
+  })
+
+  await prisma.coverageRequirement.createMany({
+    data: templateSlots.map(s => ({
+      locationId,
+      organizationId,
+      templateId,
+      dayOfWeek: s.dayOfWeek,
+      date: addDaysUTC(weekStart, s.dayOfWeek),
+      startTime: s.startTime,
+      endTime: s.endTime,
+      minWorkers: s.minWorkers,
+      idealWorkers: s.idealWorkers,
+      laborRoleId: s.laborRoleId,
+      skillId: s.skillId,
+      isRequired: s.isRequired,
+      notes: s.notes,
+      priority: s.priority,
+    })),
+  })
+
+  revalidatePath('/coverage')
+  return { count: templateSlots.length, templateName: template.name }
+}
+
 // ── Borrar toda la cobertura de una semana ──────────────────────────────────
 export async function clearWeekCoverage(locationId: string, weekStartISO: string) {
   const weekStart = toUTCDate(weekStartISO)
