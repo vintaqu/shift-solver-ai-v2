@@ -108,7 +108,7 @@ interface EditorState {
 // ═════════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ═════════════════════════════════════════════════════════════════════════════
-export function PlannerClientPage({ period, employees, weekDays, allPeriods, absences = [], coverageSlots = [], weekStartISO, laborRoles = [] }: Props) {
+export function PlannerClientPage({ period, employees: allEmployees, weekDays, allPeriods, absences = [], coverageSlots = [], weekStartISO, laborRoles = [] }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [editor, setEditor] = useState<EditorState>({ open: false, mode: 'create' })
@@ -122,7 +122,15 @@ export function PlannerClientPage({ period, employees, weekDays, allPeriods, abs
   const [dragOverCell, setDragOverCell] = useState<{ empId: string; dayIdx: number } | null>(null)
 
   // ── Reordenar empleados ──
-  const [employeeOrder, setEmployeeOrder] = useState<string[]>(() => [...employees].sort((a: any, b: any) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0)).map((e: any) => e.id))
+  const [roleFilter, setRoleFilter] = useState<string>('')
+
+  // Empleados visibles según filtro de rol (el resto del componente trabaja siempre sobre `employees`)
+  const employees = useMemo(() => {
+    if (!roleFilter) return allEmployees
+    return allEmployees.filter((e: any) => e.skills?.[0]?.laborRole?.id === roleFilter)
+  }, [allEmployees, roleFilter])
+
+  const [employeeOrder, setEmployeeOrder] = useState<string[]>(() => [...allEmployees].sort((a: any, b: any) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0)).map((e: any) => e.id))
   const [draggedEmpId, setDraggedEmpId] = useState<string | null>(null)
   const [dragOverEmpId, setDragOverEmpId] = useState<string | null>(null)
   const sortedEmployees = employeeOrder
@@ -144,7 +152,7 @@ export function PlannerClientPage({ period, employees, weekDays, allPeriods, abs
 
   // Asignar color fijo por empleado
   const empColorMap = Object.fromEntries(
-    employees.map((e: any, i: number) => [e.id, EMP_COLORS[i % EMP_COLORS.length]])
+    allEmployees.map((e: any, i: number) => [e.id, EMP_COLORS[i % EMP_COLORS.length]])
   )
 
   // Agrupar assignments por empleado y día
@@ -191,7 +199,8 @@ export function PlannerClientPage({ period, employees, weekDays, allPeriods, abs
   }
 
   function dayCoverage(dayIdx: number) {
-    const reqs = coverageByDate[dateISOForDay(dayIdx)] || []
+    let reqs = coverageByDate[dateISOForDay(dayIdx)] || []
+    if (roleFilter) reqs = reqs.filter((r: any) => r.laborRoleId === roleFilter)
     const maxReq = reqs.length > 0 ? Math.max(...reqs.map((r: any) => r.minWorkers)) : 0
     const working = employees.filter(e =>
       (assignmentsByEmpDay[e.id]?.[dayIdx] || []).length > 0
@@ -202,7 +211,8 @@ export function PlannerClientPage({ period, employees, weekDays, allPeriods, abs
   // Cobertura franja-a-franja de un día: para cada slot de cobertura, cuenta empleados asignados que cubren esa franja
   function franjaCoverage(dayIdx: number) {
     const dateISO = dateISOForDay(dayIdx)
-    const reqs = (coverageByDate[dateISO] || []).slice().sort((a, b) => a.startTime.localeCompare(b.startTime))
+    let reqs = (coverageByDate[dateISO] || []).slice().sort((a, b) => a.startTime.localeCompare(b.startTime))
+    if (roleFilter) reqs = reqs.filter((r: any) => r.laborRoleId === roleFilter)
     const dayAssignments = employees.flatMap(e => assignmentsByEmpDay[e.id]?.[dayIdx] || [])
     return reqs.map((r: any) => {
       const reqStart = timeToMin(r.startTime)
@@ -325,6 +335,29 @@ export function PlannerClientPage({ period, employees, weekDays, allPeriods, abs
               {criticalIssues} alerta{criticalIssues > 1 ? 's' : ''}
             </div>
           )}
+          {/* Filtro por rol */}
+          {laborRoles.length > 0 && (
+            <div className="relative">
+              <select
+                value={roleFilter}
+                onChange={e => setRoleFilter(e.target.value)}
+                className={cn(
+                  'appearance-none pl-3 pr-8 py-1.5 rounded-lg border text-[12px] font-medium cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-200 transition-colors',
+                  roleFilter ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-gray-200 bg-white text-gray-600'
+                )}
+              >
+                <option value="">Todos los roles</option>
+                {laborRoles.map((r: any) => (
+                  <option key={r.id} value={r.id}>{r.name}</option>
+                ))}
+              </select>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+                className={cn('absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none', roleFilter ? 'text-indigo-500' : 'text-gray-400')}>
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+            </div>
+          )}
+
           <button
             onClick={() => setShowCoverage(v => !v)}
             className={cn(

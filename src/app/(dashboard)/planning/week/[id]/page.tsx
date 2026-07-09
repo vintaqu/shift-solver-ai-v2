@@ -18,7 +18,7 @@ export default async function PlanningWeekPage({ params }: { params: { id: strin
           employee: {
             include: {
               contracts: { where: { isActive: true }, take: 1 },
-              skills: { include: { skill: true } },
+              skills: { include: { skill: true, laborRole: true } },
             },
           },
           laborRole: true,
@@ -39,7 +39,7 @@ export default async function PlanningWeekPage({ params }: { params: { id: strin
     where: { organizationId: period.organizationId, isActive: true },
     include: {
       contracts: { where: { isActive: true }, take: 1 },
-      skills: { include: { skill: true } },
+      skills: { include: { skill: true, laborRole: true } },
     },
     orderBy: [{ displayOrder: 'asc' }, { firstName: 'asc' }] as any,
   })

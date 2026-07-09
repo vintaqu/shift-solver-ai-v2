@@ -73,16 +73,34 @@ interface Props {
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 export function DayPlannerClient({
-  dateISO, periodId, periodStatus, assignments, employees, coverageSlots,
+  dateISO, periodId, periodStatus, assignments: allAssignments, employees: allEmployees, coverageSlots: allCoverageSlots,
   locationId, organizationId, laborRoles = [],
 }: Props) {
   const router = useRouter()
   const [quickEdit, setQuickEdit] = useState<{ time: string; slot: any | null } | null>(null)
   const [hoverFranja, setHoverFranja] = useState<string | null>(null)
+  const [roleFilter, setRoleFilter] = useState<string>('')
+
+  // Filtro por rol: empleados, turnos y cobertura del rol seleccionado
+  const employees = useMemo(() => {
+    if (!roleFilter) return allEmployees
+    return allEmployees.filter((e: any) => e.skills?.[0]?.laborRole?.id === roleFilter)
+  }, [allEmployees, roleFilter])
+
+  const assignments = useMemo(() => {
+    if (!roleFilter) return allAssignments
+    const visibleIds = new Set(employees.map((e: any) => e.id))
+    return allAssignments.filter((a: any) => visibleIds.has(a.employeeId))
+  }, [allAssignments, employees, roleFilter])
+
+  const coverageSlots = useMemo(() => {
+    if (!roleFilter) return allCoverageSlots
+    return allCoverageSlots.filter((s: any) => s.laborRoleId === roleFilter)
+  }, [allCoverageSlots, roleFilter])
 
   const empColorMap = useMemo(() => Object.fromEntries(
-    employees.map((e: any, i: number) => [e.id, EMP_COLORS[i % EMP_COLORS.length]])
-  ), [employees])
+    allEmployees.map((e: any, i: number) => [e.id, EMP_COLORS[i % EMP_COLORS.length]])
+  ), [allEmployees])
 
   // ── Rango horario del día: min/max entre cobertura y turnos; fallback 08–24 ──
   const range = useMemo(() => {
@@ -188,6 +206,27 @@ export function DayPlannerClient({
         </div>
 
         <div className="flex items-center gap-3 text-[12px] text-gray-400">
+          {laborRoles.length > 0 && (
+            <div className="relative mr-1">
+              <select
+                value={roleFilter}
+                onChange={e => setRoleFilter(e.target.value)}
+                className={cn(
+                  'appearance-none pl-3 pr-8 py-1.5 rounded-lg border text-[12px] font-medium cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-200 transition-colors',
+                  roleFilter ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-gray-200 bg-white text-gray-600'
+                )}
+              >
+                <option value="">Todos los roles</option>
+                {laborRoles.map((r: any) => (
+                  <option key={r.id} value={r.id}>{r.name}</option>
+                ))}
+              </select>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+                className={cn('absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none', roleFilter ? 'text-indigo-500' : 'text-gray-400')}>
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+            </div>
+          )}
           <span className="flex items-center gap-1.5">
             <span className="w-3 h-3 rounded-sm bg-indigo-500 inline-block" /> Planificado
           </span>
