@@ -58,6 +58,12 @@ export default async function DayPlanningPage({ params }: { params: { date: stri
     orderBy: [{ displayOrder: 'asc' }, { firstName: 'asc' }] as any,
   })
 
+  // Roles laborales (para el editor de cobertura)
+  const laborRoles = await prisma.laborRole.findMany({
+    where: { organizationId },
+    orderBy: { priority: 'asc' },
+  })
+
   // Cobertura de la fecha — garantizando herencia semanal
   await ensureWeekCoverage(locationId, organizationId, weekStartISO)
   const weekCoverage = await getWeekCoverage(locationId, weekStartISO)
@@ -75,6 +81,7 @@ export default async function DayPlanningPage({ params }: { params: { date: stri
       coverageSlots={JSON.parse(JSON.stringify(dayCoverage))}
       locationId={locationId}
       organizationId={organizationId}
+      laborRoles={JSON.parse(JSON.stringify(laborRoles))}
     />
   )
 }

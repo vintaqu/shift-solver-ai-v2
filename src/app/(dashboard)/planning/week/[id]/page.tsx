@@ -59,6 +59,12 @@ export default async function PlanningWeekPage({ params }: { params: { id: strin
   await ensureWeekCoverage(period.locationId, period.organizationId, weekStartISO)
   const coverageSlots = await getWeekCoverage(period.locationId, weekStartISO)
 
+  // Roles laborales (para el editor de cobertura inline)
+  const laborRoles = await prisma.laborRole.findMany({
+    where: { organizationId: period.organizationId },
+    orderBy: { priority: 'asc' },
+  })
+
   // Ausencias aprobadas que solapan con esta semana (para avisos en el grid)
   const absences = await prisma.absenceRequest.findMany({
     where: {
@@ -82,6 +88,7 @@ export default async function PlanningWeekPage({ params }: { params: { id: strin
       absences={JSON.parse(JSON.stringify(absences))}
       coverageSlots={JSON.parse(JSON.stringify(coverageSlots))}
       weekStartISO={weekStartISO}
+      laborRoles={JSON.parse(JSON.stringify(laborRoles))}
     />
   )
 }

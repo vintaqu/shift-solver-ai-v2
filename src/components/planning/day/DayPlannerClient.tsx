@@ -68,12 +68,13 @@ interface Props {
   coverageSlots: any[]
   locationId: string
   organizationId: string
+  laborRoles?: any[]
 }
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 export function DayPlannerClient({
   dateISO, periodId, periodStatus, assignments, employees, coverageSlots,
-  locationId, organizationId,
+  locationId, organizationId, laborRoles = [],
 }: Props) {
   const router = useRouter()
   const [quickEdit, setQuickEdit] = useState<{ time: string; slot: any | null } | null>(null)
@@ -379,6 +380,7 @@ export function DayPlannerClient({
           date={dateISO}
           time={quickEdit.time}
           slot={quickEdit.slot}
+          roles={laborRoles}
           locationId={locationId}
           organizationId={organizationId}
           onClose={() => setQuickEdit(null)}
@@ -390,25 +392,27 @@ export function DayPlannerClient({
 }
 
 // ─── Modal de edición rápida (mismo patrón que el del planner semanal) ────────
-function QuickCoverageEditModal({ date, time, slot, locationId, organizationId, onClose, onSaved }: any) {
+function QuickCoverageEditModal({ date, time, slot, roles = [], locationId, organizationId, onClose, onSaved }: any) {
   const [isPending, startTransition] = useTransition()
   const [confirmDelete, setConfirmDelete] = useState(false)
   const isEdit = !!slot
   const [min, setMin] = useState(slot?.minWorkers ?? 2)
   const [ideal, setIdeal] = useState(slot?.idealWorkers ?? 2)
   const [isRequired, setIsRequired] = useState(slot?.isRequired ?? true)
+  const [laborRoleId, setLaborRoleId] = useState<string>(slot?.laborRoleId ?? '')
+  const [notes, setNotes] = useState<string>(slot?.notes ?? '')
   const colors = demandColor(min)
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" />
-      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-[340px]" onClick={e => e.stopPropagation()}>
-        <div className="px-5 py-3.5 border-b border-gray-100" style={{ background: 'linear-gradient(135deg,#eef2ff,#f5f3ff)' }}>
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-[400px] flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
+        <div className="px-5 py-3.5 border-b border-gray-100 flex-shrink-0" style={{ background: 'linear-gradient(135deg,#eef2ff,#f5f3ff)' }}>
           <h3 className="text-[13px] font-bold text-gray-900">{isEdit ? 'Editar franja' : 'Nueva franja'}</h3>
           <p className="text-[11px] text-gray-500 mt-0.5">{date} · {time}</p>
         </div>
 
-        <div className="px-5 py-4 space-y-4">
+        <div className="px-5 py-4 space-y-4 overflow-y-auto flex-1">
           <div className="flex gap-6 justify-center">
             <div className="text-center">
               <div className="text-[10px] text-gray-400 mb-1.5">Mínimo</div>
@@ -428,6 +432,27 @@ function QuickCoverageEditModal({ date, time, slot, locationId, organizationId, 
             </div>
           </div>
 
+          {roles.length > 0 && (
+            <div>
+              <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Rol requerido (opcional)</div>
+              <div className="flex flex-wrap gap-1.5">
+                <button onClick={() => setLaborRoleId('')}
+                  className={cn('px-2.5 py-1 rounded-lg text-[11px] font-semibold border-2 transition-all',
+                    !laborRoleId ? 'border-gray-400 bg-gray-100 text-gray-700' : 'border-gray-200 text-gray-400 hover:border-gray-300')}>
+                  Cualquiera
+                </button>
+                {roles.map((r: any) => (
+                  <button key={r.id} onClick={() => setLaborRoleId(laborRoleId === r.id ? '' : r.id)}
+                    className={cn('px-2.5 py-1 rounded-lg text-[11px] font-semibold border-2 text-white transition-all',
+                      laborRoleId === r.id ? 'scale-105' : 'opacity-50 hover:opacity-75')}
+                    style={{ backgroundColor: r.color, borderColor: r.color }}>
+                    {r.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className={cn('flex items-center gap-2 p-2.5 rounded-xl border cursor-pointer transition-all', isRequired ? 'border-red-200 bg-red-50' : 'border-gray-200 bg-white')}
             onClick={() => setIsRequired((v: boolean) => !v)}>
             <div className={cn('w-8 h-4 rounded-full transition-all relative flex-shrink-0', isRequired ? 'bg-red-500' : 'bg-gray-300')}>
@@ -435,9 +460,19 @@ function QuickCoverageEditModal({ date, time, slot, locationId, organizationId, 
             </div>
             <span className="text-[11px] font-medium text-gray-600">Slot obligatorio</span>
           </div>
+
+          <div>
+            <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Notas (opcional)</div>
+            <input
+              className="w-full border border-gray-200 rounded-xl px-3 py-2 text-[12px] bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              placeholder="Ej: Necesita barista, hora pico…"
+            />
+          </div>
         </div>
 
-        <div className="flex justify-between items-center px-5 py-3.5 border-t border-gray-100">
+        <div className="flex justify-between items-center px-5 py-3.5 border-t border-gray-100 flex-shrink-0">
           {confirmDelete ? (
             <div className="flex items-center gap-2">
               <span className="text-[11px] text-red-600 font-medium">¿Eliminar?</span>
@@ -468,7 +503,9 @@ function QuickCoverageEditModal({ date, time, slot, locationId, organizationId, 
                     startTime: time,
                     endTime: minToTime(timeToMin(time) + 30),
                     minWorkers: min, idealWorkers: ideal,
+                    laborRoleId: laborRoleId || null,
                     isRequired,
+                    notes,
                   })
                   toast.success(isEdit ? 'Franja actualizada ✓' : 'Franja creada ✓')
                   onSaved()
