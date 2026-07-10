@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition, useMemo } from 'react'
+import { useState, useTransition, useMemo, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
@@ -79,23 +79,23 @@ export function DayPlannerClient({
   const router = useRouter()
   const [quickEdit, setQuickEdit] = useState<{ time: string; slot: any | null } | null>(null)
   const [hoverFranja, setHoverFranja] = useState<string | null>(null)
-  const [roleFilter, setRoleFilter] = useState<string>('')
+  const [roleFilter, setRoleFilter] = useState<string[]>([])
 
-  // Filtro por rol: empleados, turnos y cobertura del rol seleccionado
+  // Filtro por roles: empleados, turnos y cobertura de los roles seleccionados
   const employees = useMemo(() => {
-    if (!roleFilter) return allEmployees
-    return allEmployees.filter((e: any) => e.skills?.[0]?.laborRole?.id === roleFilter)
+    if (roleFilter.length === 0) return allEmployees
+    return allEmployees.filter((e: any) => roleFilter.includes(e.skills?.[0]?.laborRole?.id))
   }, [allEmployees, roleFilter])
 
   const assignments = useMemo(() => {
-    if (!roleFilter) return allAssignments
+    if (roleFilter.length === 0) return allAssignments
     const visibleIds = new Set(employees.map((e: any) => e.id))
     return allAssignments.filter((a: any) => visibleIds.has(a.employeeId))
   }, [allAssignments, employees, roleFilter])
 
   const coverageSlots = useMemo(() => {
-    if (!roleFilter) return allCoverageSlots
-    return allCoverageSlots.filter((s: any) => s.laborRoleId === roleFilter)
+    if (roleFilter.length === 0) return allCoverageSlots
+    return allCoverageSlots.filter((s: any) => roleFilter.includes(s.laborRoleId))
   }, [allCoverageSlots, roleFilter])
 
   const empColorMap = useMemo(() => Object.fromEntries(
@@ -207,24 +207,8 @@ export function DayPlannerClient({
 
         <div className="flex items-center gap-3 text-[12px] text-gray-400">
           {laborRoles.length > 0 && (
-            <div className="relative mr-1">
-              <select
-                value={roleFilter}
-                onChange={e => setRoleFilter(e.target.value)}
-                className={cn(
-                  'appearance-none pl-3 pr-8 py-1.5 rounded-lg border text-[12px] font-medium cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-200 transition-colors',
-                  roleFilter ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-gray-200 bg-white text-gray-600'
-                )}
-              >
-                <option value="">Todos los roles</option>
-                {laborRoles.map((r: any) => (
-                  <option key={r.id} value={r.id}>{r.name}</option>
-                ))}
-              </select>
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
-                className={cn('absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none', roleFilter ? 'text-indigo-500' : 'text-gray-400')}>
-                <path d="M6 9l6 6 6-6" />
-              </svg>
+            <div className="mr-1">
+              <RoleFilterDropdown roles={laborRoles} selected={roleFilter} onChange={setRoleFilter} />
             </div>
           )}
           <span className="flex items-center gap-1.5">
@@ -558,6 +542,81 @@ function QuickCoverageEditModal({ date, time, slot, roles = [], locationId, orga
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+// ─── RoleFilterDropdown — filtro multi-selección de roles ─────────────────────
+function RoleFilterDropdown({ roles, selected, onChange }: { roles: any[]; selected: string[]; onChange: (v: string[]) => void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const label = selected.length === 0
+    ? 'Todos los roles'
+    : selected.length === 1
+    ? roles.find(r => r.id === selected[0])?.name ?? '1 rol'
+    : `${selected.length} roles`
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen(v => !v)}
+        className={cn(
+          'flex items-center gap-1.5 pl-3 pr-2.5 py-1.5 rounded-lg border text-[12px] font-medium transition-colors',
+          selected.length > 0 ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+        )}
+      >
+        {label}
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+          className={cn('transition-transform', open && 'rotate-180')}>
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-9 z-30 w-[220px] bg-white rounded-2xl border border-gray-200 shadow-xl overflow-hidden py-1.5">
+          <button
+            onClick={() => onChange([])}
+            className="w-full flex items-center gap-2.5 px-3.5 py-2 text-left hover:bg-gray-50 transition-colors"
+          >
+            <div className={cn('w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0',
+              selected.length === 0 ? 'bg-indigo-600 border-indigo-600' : 'border-gray-300')}>
+              {selected.length === 0 && (
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><path d="M20 6L9 17l-5-5" /></svg>
+              )}
+            </div>
+            <span className="text-[12px] font-semibold text-gray-700">Todos los roles</span>
+          </button>
+          <div className="my-1 border-t border-gray-100" />
+          {roles.map((r: any) => {
+            const checked = selected.includes(r.id)
+            return (
+              <button
+                key={r.id}
+                onClick={() => onChange(checked ? selected.filter(id => id !== r.id) : [...selected, r.id])}
+                className="w-full flex items-center gap-2.5 px-3.5 py-2 text-left hover:bg-gray-50 transition-colors"
+              >
+                <div className={cn('w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0',
+                  checked ? 'bg-indigo-600 border-indigo-600' : 'border-gray-300')}>
+                  {checked && (
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><path d="M20 6L9 17l-5-5" /></svg>
+                  )}
+                </div>
+                <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: r.color }} />
+                <span className="text-[12px] text-gray-700 truncate">{r.name}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
