@@ -140,6 +140,34 @@ export function PlannerClientPage({ period, employees: allEmployees, weekDays, a
   const [publishing, setPublishing] = useState(false)
 
   // Helper: ausencia aprobada de un empleado en un día concreto
+  // Restricción de disponibilidad del empleado para un día (recurrente por dayOfWeek o puntual por fecha)
+  function getUnavailabilityForDay(emp: any, dayIndex: number): { label: string; detail?: string } | null {
+    const avails: any[] = emp.availabilities || []
+    if (avails.length === 0) return null
+    const dateISO = dateISOForDay(dayIndex)
+    for (const av of avails) {
+      const matchesDay = av.dayOfWeek === dayIndex && (av.isRecurring || av.date == null)
+      const matchesDate = av.date && new Date(av.date).toISOString().slice(0, 10) === dateISO
+      if (!matchesDay && !matchesDate) continue
+      if (av.type === 'DAY_OFF') {
+        return {
+          label: av.startTime && av.endTime ? 'No disponible' : 'Día libre',
+          detail: av.startTime && av.endTime ? `${av.startTime}–${av.endTime}` : (av.notes || undefined),
+        }
+      }
+      if (av.type === 'ONLY_BETWEEN' && av.startTime && av.endTime) {
+        return { label: 'Solo disponible', detail: `${av.startTime}–${av.endTime}` }
+      }
+      if (av.type === 'NOT_BEFORE' && av.startTime) {
+        return { label: 'No antes de', detail: av.startTime }
+      }
+      if (av.type === 'NOT_AFTER' && av.endTime) {
+        return { label: 'No después de', detail: av.endTime }
+      }
+    }
+    return null
+  }
+
   function getAbsenceForDay(empId: string, dayIndex: number): AbsenceBlock | null {
     const dayDate = parseISO(weekDays[dayIndex])
     return absences.find(a => {
@@ -552,21 +580,13 @@ export function PlannerClientPage({ period, employees: allEmployees, weekDays, a
                         })
                       }}
                     >
-                      {(() => {
-                        const absence = getAbsenceForDay(emp.id, dayIdx)
-                        const ABSENCE_TYPE_LABELS: Record<string, { label: string; bg: string; text: string; icon: string }> = {
-                          VACACIONES:    { label: 'Vacaciones', bg: '#dbeafe', text: '#1e40af', icon: '🏖️' },
-                          BAJA:          { label: 'Baja médica', bg: '#fee2e2', text: '#991b1b', icon: '🤒' },
-                          PERMISO:       { label: 'Permiso', bg: '#fef9c3', text: '#854d0e', icon: '📋' },
-                          AUSENCIA:      { label: 'Ausencia', bg: '#f3e8ff', text: '#6b21a8', icon: '❌' },
-                          ASUNTO_PROPIO: { label: 'Asunto propio', bg: '#dcfce7', text: '#166534', icon: '🏠' },
-                        }
-                        return null
-                      })()}
                     {dayAssignments.length === 0 ? (
                         <div className="relative w-full h-full min-h-[56px]">
                           {(() => {
                             const absence = getAbsenceForDay(emp.id, dayIdx)
+                            const unavail = !absence ? getUnavailabilityForDay(emp, dayIdx) : null
+
+                            // Zona bloqueada por AUSENCIA — visible pero editable manualmente
                             if (absence) {
                               const cfg = {
                                 VACACIONES:    { label: 'Vacaciones', bg: '#eff6ff', text: '#1d4ed8', border: '#bfdbfe', icon: '🏖️' },
@@ -576,13 +596,44 @@ export function PlannerClientPage({ period, employees: allEmployees, weekDays, a
                                 ASUNTO_PROPIO: { label: 'Asunto',     bg: '#f0fdf4', text: '#16a34a', border: '#bbf7d0', icon: '🏠' },
                               }[absence.type] || { label: absence.type, bg: '#f9fafb', text: '#6b7280', border: '#e5e7eb', icon: '📅' }
                               return (
-                                <div className="absolute inset-0 rounded-lg flex flex-col items-center justify-center gap-0.5 border-2 border-dashed"
-                                  style={{ backgroundColor: cfg.bg, borderColor: cfg.border }}>
-                                  <span className="text-[14px]">{cfg.icon}</span>
-                                  <span className="text-[9px] font-bold" style={{ color: cfg.text }}>{cfg.label}</span>
-                                </div>
+                                <button
+                                  onClick={() => openCreate(emp.id, dayIdx)}
+                                  title={`${cfg.label} — click para asignar turno manual igualmente`}
+                                  className="absolute inset-0 rounded-lg flex flex-col items-center justify-center gap-0.5 border-2 border-dashed w-full group/abs transition-all hover:ring-2 hover:ring-indigo-200"
+                                  style={{ backgroundColor: cfg.bg, borderColor: cfg.border }}
+                                >
+                                  <span className="text-[14px] group-hover/abs:hidden">{cfg.icon}</span>
+                                  <span className="text-[9px] font-bold group-hover/abs:hidden" style={{ color: cfg.text }}>{cfg.label}</span>
+                                  <span className="hidden group-hover/abs:flex items-center gap-1 text-[10px] font-bold text-indigo-600">
+                                    <Plus size={12} /> Añadir igualmente
+                                  </span>
+                                </button>
                               )
                             }
+
+                            // Zona bloqueada por DISPONIBILIDAD (ej. no trabaja findes) — editable
+                            if (unavail) {
+                              return (
+                                <button
+                                  onClick={() => openCreate(emp.id, dayIdx)}
+                                  title={`${unavail.label}${unavail.detail ? ` (${unavail.detail})` : ''} — click para asignar turno manual igualmente`}
+                                  className="absolute inset-0 rounded-lg w-full group/unav transition-all hover:ring-2 hover:ring-indigo-200 border border-gray-200 overflow-hidden"
+                                  style={{
+                                    background: 'repeating-linear-gradient(45deg, #f9fafb, #f9fafb 6px, #f1f5f9 6px, #f1f5f9 12px)',
+                                  }}
+                                >
+                                  <span className="flex flex-col items-center justify-center gap-0.5 h-full group-hover/unav:hidden">
+                                    <span className="text-[12px]">🚫</span>
+                                    <span className="text-[9px] font-bold text-gray-500">{unavail.label}</span>
+                                    {unavail.detail && <span className="text-[8px] text-gray-400">{unavail.detail}</span>}
+                                  </span>
+                                  <span className="hidden group-hover/unav:flex items-center justify-center gap-1 h-full text-[10px] font-bold text-indigo-600">
+                                    <Plus size={12} /> Añadir igualmente
+                                  </span>
+                                </button>
+                              )
+                            }
+
                             return (
                               <button
                                 onClick={() => openCreate(emp.id, dayIdx)}

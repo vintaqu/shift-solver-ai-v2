@@ -40,6 +40,7 @@ export default async function PlanningWeekPage({ params }: { params: { id: strin
     include: {
       contracts: { where: { isActive: true }, take: 1 },
       skills: { include: { skill: true, laborRole: true } },
+      availabilities: true,
     },
     orderBy: [{ displayOrder: 'asc' }, { firstName: 'asc' }] as any,
   })
