@@ -192,6 +192,53 @@ export async function toggleAssignmentLock(assignmentId: string) {
 }
 
 // ─── Publish ──────────────────────────────────────────────────────────────────
+// ── Intercambiar turnos entre dos empleados en un rango de fechas ──────────
+// scope 'day': una fecha concreta · scope 'week': la semana entera del periodo
+export async function swapAssignments(data: {
+  planningPeriodId: string
+  employeeAId: string
+  employeeBId: string
+  fromDateISO: string   // inicio del rango (inclusive)
+  toDateISO: string     // fin del rango (inclusive)
+}) {
+  const period = await prisma.planningPeriod.findUnique({ where: { id: data.planningPeriodId } })
+  if (!period) throw new Error('Periodo de planificación no encontrado')
+  if (period.status === 'PUBLISHED') throw new Error('No se puede intercambiar en una semana publicada')
+  if (data.employeeAId === data.employeeBId) throw new Error('Selecciona dos empleados distintos')
+
+  const from = new Date(data.fromDateISO + 'T00:00:00Z')
+  const to = new Date(data.toDateISO + 'T23:59:59Z')
+
+  const [aShifts, bShifts] = await Promise.all([
+    prisma.assignment.findMany({
+      where: { planningPeriodId: data.planningPeriodId, employeeId: data.employeeAId, date: { gte: from, lte: to } },
+      select: { id: true },
+    }),
+    prisma.assignment.findMany({
+      where: { planningPeriodId: data.planningPeriodId, employeeId: data.employeeBId, date: { gte: from, lte: to } },
+      select: { id: true },
+    }),
+  ])
+
+  if (aShifts.length === 0 && bShifts.length === 0) {
+    throw new Error('Ninguno de los dos empleados tiene turnos en ese rango')
+  }
+
+  await prisma.$transaction([
+    prisma.assignment.updateMany({
+      where: { id: { in: aShifts.map(s => s.id) } },
+      data: { employeeId: data.employeeBId },
+    }),
+    prisma.assignment.updateMany({
+      where: { id: { in: bShifts.map(s => s.id) } },
+      data: { employeeId: data.employeeAId },
+    }),
+  ])
+
+  revalidatePath(`/planning/week/${data.planningPeriodId}`)
+  return { movedFromA: aShifts.length, movedFromB: bShifts.length }
+}
+
 export async function publishPlanningPeriod(planningPeriodId: string) {
   const period = await getPeriodOrThrow(planningPeriodId)
 
