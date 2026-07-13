@@ -210,11 +210,11 @@ export async function swapAssignments(data: {
   const to = new Date(data.toDateISO + 'T23:59:59Z')
 
   const [aShifts, bShifts] = await Promise.all([
-    prisma.assignment.findMany({
+    prisma.scheduleAssignment.findMany({
       where: { planningPeriodId: data.planningPeriodId, employeeId: data.employeeAId, date: { gte: from, lte: to } },
       select: { id: true },
     }),
-    prisma.assignment.findMany({
+    prisma.scheduleAssignment.findMany({
       where: { planningPeriodId: data.planningPeriodId, employeeId: data.employeeBId, date: { gte: from, lte: to } },
       select: { id: true },
     }),
@@ -225,11 +225,11 @@ export async function swapAssignments(data: {
   }
 
   await prisma.$transaction([
-    prisma.assignment.updateMany({
+    prisma.scheduleAssignment.updateMany({
       where: { id: { in: aShifts.map(s => s.id) } },
       data: { employeeId: data.employeeBId },
     }),
-    prisma.assignment.updateMany({
+    prisma.scheduleAssignment.updateMany({
       where: { id: { in: bShifts.map(s => s.id) } },
       data: { employeeId: data.employeeAId },
     }),
