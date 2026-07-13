@@ -5,10 +5,11 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
   ChevronLeft, ChevronRight, Users, Loader2, CheckCircle, X,
-  CalendarDays, Calendar, Clock,
+  CalendarDays, Calendar, Clock, ArrowLeftRight, AlertTriangle,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { upsertDateSlot, deleteDateSlot } from '@/server/actions/coverageWeekly'
+import { swapAssignments } from '@/server/actions/planning'
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 const DAYS_FULL = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
@@ -69,17 +70,19 @@ interface Props {
   locationId: string
   organizationId: string
   laborRoles?: any[]
+  absences?: any[]
 }
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 export function DayPlannerClient({
   dateISO, periodId, periodStatus, assignments: allAssignments, employees: allEmployees, coverageSlots: allCoverageSlots,
-  locationId, organizationId, laborRoles = [],
+  locationId, organizationId, laborRoles = [], absences = [],
 }: Props) {
   const router = useRouter()
   const [quickEdit, setQuickEdit] = useState<{ time: string; slot: any | null } | null>(null)
   const [hoverFranja, setHoverFranja] = useState<string | null>(null)
   const [roleFilter, setRoleFilter] = useState<string[]>([])
+  const [showSwapModal, setShowSwapModal] = useState(false)
 
   // Filtro por roles: empleados, turnos y cobertura de los roles seleccionados
   const employees = useMemo(() => {
@@ -149,6 +152,51 @@ export function DayPlannerClient({
 
   const pct = (m: number) => ((m - range.start) / totalMin) * 100
 
+  const dowOfDate = (new Date(dateISO + 'T00:00:00Z').getUTCDay() + 6) % 7
+
+  const ABSENCE_CFG: Record<string, { label: string; bg: string; text: string; icon: string }> = {
+    VACACIONES:    { label: 'Vacaciones', bg: '#eff6ff', text: '#1d4ed8', icon: '🏖️' },
+    BAJA:          { label: 'Baja',       bg: '#fef2f2', text: '#dc2626', icon: '🤒' },
+    PERMISO:       { label: 'Permiso',    bg: '#fefce8', text: '#ca8a04', icon: '📋' },
+    AUSENCIA:      { label: 'Ausencia',   bg: '#fdf4ff', text: '#9333ea', icon: '❌' },
+    ASUNTO_PROPIO: { label: 'Asunto',     bg: '#f0fdf4', text: '#16a34a', icon: '🏠' },
+  }
+
+  function getAbsence(empId: string) {
+    const a = absences.find((x: any) => x.employeeId === empId)
+    if (!a) return null
+    return ABSENCE_CFG[a.type] || { label: a.type, bg: '#f9fafb', text: '#6b7280', icon: '📅' }
+  }
+
+  // Zonas horarias bloqueadas por disponibilidad, recortadas al rango visible del eje
+  function getUnavailZones(emp: any): Array<{ start: number; end: number; label: string }> {
+    const zones: Array<{ start: number; end: number; label: string }> = []
+    for (const av of (emp.availabilities || [])) {
+      const matchesDay = av.dayOfWeek === dowOfDate && (av.isRecurring || av.date == null)
+      const matchesDate = av.date && new Date(av.date).toISOString().slice(0, 10) === dateISO
+      if (!matchesDay && !matchesDate) continue
+
+      if (av.type === 'DAY_OFF') {
+        if (av.startTime && av.endTime) {
+          zones.push({ start: timeToMin(av.startTime), end: endMin(av.endTime), label: `No disponible ${av.startTime}–${av.endTime}` })
+        } else {
+          zones.push({ start: range.start, end: range.end, label: 'Día libre' })
+        }
+      } else if (av.type === 'NOT_BEFORE' && av.startTime) {
+        zones.push({ start: range.start, end: timeToMin(av.startTime), label: `No antes de ${av.startTime}` })
+      } else if (av.type === 'NOT_AFTER' && av.endTime) {
+        zones.push({ start: timeToMin(av.endTime), end: range.end, label: `No después de ${av.endTime}` })
+      } else if (av.type === 'ONLY_BETWEEN' && av.startTime && av.endTime) {
+        zones.push({ start: range.start, end: timeToMin(av.startTime), label: `Solo disponible ${av.startTime}–${av.endTime}` })
+        zones.push({ start: endMin(av.endTime), end: range.end, label: `Solo disponible ${av.startTime}–${av.endTime}` })
+      }
+    }
+    // Recortar al rango visible y descartar zonas vacías
+    return zones
+      .map(z => ({ ...z, start: Math.max(z.start, range.start), end: Math.min(z.end, range.end) }))
+      .filter(z => z.end > z.start)
+  }
+
   return (
     <div className="flex flex-col h-[calc(100vh-52px)] overflow-hidden bg-[#F7F8FA]">
 
@@ -210,6 +258,14 @@ export function DayPlannerClient({
             <div className="mr-1">
               <RoleFilterDropdown roles={laborRoles} selected={roleFilter} onChange={setRoleFilter} />
             </div>
+          )}
+          {periodId && periodStatus !== 'PUBLISHED' && (
+            <button
+              onClick={() => setShowSwapModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-600 text-[12px] font-medium hover:bg-gray-50 transition-colors mr-1"
+            >
+              <ArrowLeftRight size={13} /> Intercambiar
+            </button>
           )}
           <span className="flex items-center gap-1.5">
             <span className="w-3 h-3 rounded-sm bg-indigo-500 inline-block" /> Planificado
@@ -330,6 +386,37 @@ export function DayPlannerClient({
                   {hours.map(m => (
                     <div key={m} className="absolute top-0 bottom-0 w-px bg-gray-50" style={{ left: `${pct(m)}%` }} />
                   ))}
+                  {/* Zonas bloqueadas por disponibilidad (rayado) — informativas, no bloquean */}
+                  {getUnavailZones(emp).map((z, zi) => (
+                    <div key={`z${zi}`}
+                      title={z.label}
+                      className="absolute top-0 bottom-0 border-x border-gray-200/60 flex items-center justify-center overflow-hidden"
+                      style={{
+                        left: `${pct(z.start)}%`,
+                        width: `${pct(z.end) - pct(z.start)}%`,
+                        background: 'repeating-linear-gradient(45deg, rgba(148,163,184,0.10), rgba(148,163,184,0.10) 6px, rgba(148,163,184,0.22) 6px, rgba(148,163,184,0.22) 12px)',
+                      }}
+                    >
+                      {(pct(z.end) - pct(z.start)) > 9 && (
+                        <span className="text-[9px] font-semibold text-gray-400 whitespace-nowrap px-1">🚫 {z.label}</span>
+                      )}
+                    </div>
+                  ))}
+                  {/* Ausencia aprobada: overlay de todo el día */}
+                  {(() => {
+                    const abs = getAbsence(emp.id)
+                    if (!abs) return null
+                    return (
+                      <div
+                        title={`${abs.label} — ausencia aprobada`}
+                        className="absolute inset-0 flex items-center justify-center gap-1 border-y-2 border-dashed"
+                        style={{ backgroundColor: abs.bg + 'cc', borderColor: abs.text + '44' }}
+                      >
+                        <span className="text-[12px]">{abs.icon}</span>
+                        <span className="text-[10px] font-bold" style={{ color: abs.text }}>{abs.label}</span>
+                      </div>
+                    )
+                  })()}
                   {empShifts.map((a: any) => {
                     const s = timeToMin(a.startTime)
                     const e = endMin(a.endTime)
@@ -352,7 +439,7 @@ export function DayPlannerClient({
                       </div>
                     )
                   })}
-                  {empShifts.length === 0 && (
+                  {empShifts.length === 0 && !getAbsence(emp.id) && getUnavailZones(emp).length === 0 && (
                     <div className="absolute inset-0 flex items-center px-3">
                       <span className="text-[10px] text-gray-300 italic">Sin turno</span>
                     </div>
@@ -396,6 +483,21 @@ export function DayPlannerClient({
           </div>
         )}
       </div>
+
+      {/* ── Modal intercambio de turnos del día ── */}
+      {showSwapModal && periodId && (
+        <SwapModal
+          scope="day"
+          periodId={periodId}
+          fromDateISO={dateISO}
+          toDateISO={dateISO}
+          rangeLabel={fmtDate(dateISO)}
+          employees={allEmployees}
+          assignments={Object.fromEntries(allEmployees.map((e: any) => [e.id, allAssignments.filter((a: any) => a.employeeId === e.id).length]))}
+          onClose={() => setShowSwapModal(false)}
+          onSwapped={() => { setShowSwapModal(false); router.refresh() }}
+        />
+      )}
 
       {/* ── Modal edición rápida de cobertura ── */}
       {quickEdit && (
@@ -617,6 +719,116 @@ function RoleFilterDropdown({ roles, selected, onChange }: { roles: any[]; selec
           })}
         </div>
       )}
+    </div>
+  )
+}
+
+// ─── SwapModal — intercambiar turnos del día entre dos empleados ──────────────
+function SwapModal({ scope, periodId, fromDateISO, toDateISO, rangeLabel, employees, assignments, onClose, onSwapped }: any) {
+  const [isPending, startTransition] = useTransition()
+  const [empA, setEmpA] = useState<string>('')
+  const [empB, setEmpB] = useState<string>('')
+
+  const countA = empA ? (assignments[empA] ?? 0) : 0
+  const countB = empB ? (assignments[empB] ?? 0) : 0
+
+  function EmpSelect({ value, onChange, exclude, placeholder }: any) {
+    return (
+      <select
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        className="w-full border border-gray-200 rounded-xl px-3 py-2 text-[13px] bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-300 cursor-pointer"
+      >
+        <option value="">{placeholder}</option>
+        {employees
+          .filter((e: any) => e.id !== exclude)
+          .map((e: any) => (
+            <option key={e.id} value={e.id}>
+              {e.firstName} {e.lastName}{e.skills?.[0]?.laborRole ? ` · ${e.skills[0].laborRole.name}` : ''}
+            </option>
+          ))}
+      </select>
+    )
+  }
+
+  const roleA = empA ? employees.find((e: any) => e.id === empA)?.skills?.[0]?.laborRole?.name : null
+  const roleB = empB ? employees.find((e: any) => e.id === empB)?.skills?.[0]?.laborRole?.name : null
+  const differentRoles = roleA && roleB && roleA !== roleB
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-[3px]" />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-[440px]" onClick={e => e.stopPropagation()}>
+        <div className="px-6 py-4 border-b border-gray-100" style={{ background: 'linear-gradient(135deg,#eef2ff,#f5f3ff)' }}>
+          <h3 className="text-[15px] font-bold text-gray-900">Intercambiar turnos del día</h3>
+          <p className="text-[11px] text-gray-500 mt-0.5 capitalize">{rangeLabel}</p>
+        </div>
+
+        <div className="px-6 py-5 space-y-4">
+          <div>
+            <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Empleado A</label>
+            <EmpSelect value={empA} onChange={setEmpA} exclude={empB} placeholder="Selecciona empleado…" />
+            {empA && (
+              <p className="text-[11px] text-gray-400 mt-1">
+                {countA} turno{countA !== 1 ? 's' : ''} este día{countA > 0 ? ' → pasarán al Empleado B' : ''}
+              </p>
+            )}
+          </div>
+
+          <div className="flex justify-center">
+            <div className="w-8 h-8 rounded-full bg-indigo-50 border border-indigo-200 flex items-center justify-center">
+              <ArrowLeftRight size={14} className="text-indigo-500" />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Empleado B</label>
+            <EmpSelect value={empB} onChange={setEmpB} exclude={empA} placeholder="Selecciona empleado…" />
+            {empB && (
+              <p className="text-[11px] text-gray-400 mt-1">
+                {countB} turno{countB !== 1 ? 's' : ''} este día{countB > 0 ? ' → pasarán al Empleado A' : ''}
+              </p>
+            )}
+          </div>
+
+          {differentRoles && (
+            <div className="flex items-start gap-2 p-2.5 rounded-xl bg-amber-50 border border-amber-200">
+              <AlertTriangle size={13} className="text-amber-500 flex-shrink-0 mt-0.5" />
+              <p className="text-[11px] text-amber-700">
+                Roles distintos ({roleA} ↔ {roleB}). El intercambio puede descuadrar la cobertura por rol — revísala después.
+              </p>
+            </div>
+          )}
+
+          {empA && empB && countA === 0 && countB === 0 && (
+            <p className="text-[11px] text-red-500">Ninguno de los dos tiene turnos este día.</p>
+          )}
+        </div>
+
+        <div className="flex justify-between px-6 py-4 border-t border-gray-100 bg-gray-50/50">
+          <button onClick={onClose} className="px-4 py-2 rounded-xl text-[13px] text-gray-500 hover:bg-gray-100">Cancelar</button>
+          <button
+            disabled={isPending || !empA || !empB || (countA === 0 && countB === 0)}
+            onClick={() => startTransition(async () => {
+              try {
+                const r = await swapAssignments({
+                  planningPeriodId: periodId,
+                  employeeAId: empA,
+                  employeeBId: empB,
+                  fromDateISO,
+                  toDateISO,
+                })
+                toast.success(`Intercambio hecho: ${r.movedFromA + r.movedFromB} turnos ✓`)
+                onSwapped()
+              } catch (e: any) { toast.error(e.message) }
+            })}
+            className="flex items-center gap-2 px-5 py-2 rounded-xl bg-indigo-600 text-white text-[13px] font-semibold hover:bg-indigo-700 disabled:opacity-50"
+          >
+            {isPending ? <Loader2 size={14} className="animate-spin" /> : <ArrowLeftRight size={14} />}
+            Intercambiar
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

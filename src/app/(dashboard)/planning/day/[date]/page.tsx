@@ -54,8 +54,20 @@ export default async function DayPlanningPage({ params }: { params: { date: stri
     include: {
       contracts: { where: { isActive: true }, take: 1 },
       skills: { include: { skill: true, laborRole: true } },
+      availabilities: true,
     },
     orderBy: [{ displayOrder: 'asc' }, { firstName: 'asc' }] as any,
+  })
+
+  // Ausencias aprobadas que cubren esta fecha
+  const absences = await prisma.absenceRequest.findMany({
+    where: {
+      organizationId,
+      status: 'APPROVED',
+      startDate: { lte: dateObj },
+      endDate: { gte: dateObj },
+    },
+    select: { id: true, employeeId: true, type: true },
   })
 
   // Roles laborales (para el editor de cobertura)
@@ -82,6 +94,7 @@ export default async function DayPlanningPage({ params }: { params: { date: stri
       locationId={locationId}
       organizationId={organizationId}
       laborRoles={JSON.parse(JSON.stringify(laborRoles))}
+      absences={JSON.parse(JSON.stringify(absences))}
     />
   )
 }
