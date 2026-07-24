@@ -298,6 +298,7 @@ model LaborRole {
   organization         Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   employeeSkills       EmployeeSkill[]
   coverageRequirements CoverageRequirement[]
+  coverageRoleReqs     CoverageRoleRequirement[]
   scheduleAssignments  ScheduleAssignment[]
   shiftTemplates       ShiftTemplate[]
 
@@ -471,9 +472,33 @@ model CoverageRequirement {
   laborRole LaborRole?        @relation(fields: [laborRoleId], references: [id])
   skill     Skill?            @relation(fields: [skillId], references: [id])
 
+  // Desglose por rol — fuente de verdad de la demanda del slot.
+  // minWorkers / idealWorkers del slot son la SUMA denormalizada de estas filas.
+  roleRequirements CoverageRoleRequirement[]
+
   @@index([locationId])
   @@index([locationId, dayOfWeek])
   @@index([locationId, date])
+}
+
+// Necesidad de un rol concreto dentro de un slot de cobertura.
+// Ej: slot 10:00-10:30 → [Camarero min 2 / ideal 3, Encargado min 1 / ideal 1]
+// La jerarquía es acumulativa: un rol superior satisface la demanda de uno inferior.
+model CoverageRoleRequirement {
+  id                    String   @id @default(cuid())
+  coverageRequirementId String
+  laborRoleId           String
+  minWorkers            Int      @default(1)
+  idealWorkers          Int      @default(1)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  coverageRequirement CoverageRequirement @relation(fields: [coverageRequirementId], references: [id], onDelete: Cascade)
+  laborRole           LaborRole           @relation(fields: [laborRoleId], references: [id], onDelete: Cascade)
+
+  @@unique([coverageRequirementId, laborRoleId])
+  @@index([coverageRequirementId])
+  @@index([laborRoleId])
 }
 
 // ============================================================

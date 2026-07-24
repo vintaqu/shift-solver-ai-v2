@@ -1,13 +1,35 @@
 'use server'
 
+// ============================================================
+// Shift Solver AI — Cobertura por PLANTILLA (patrón dayOfWeek)
+// ------------------------------------------------------------
+// Cada slot define su demanda mediante un desglose por rol
+// (CoverageRoleRequirement). `minWorkers` / `idealWorkers` del slot son la
+// suma denormalizada de ese desglose y se recalculan en cada escritura.
+// ============================================================
+
 import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/prisma'
+import {
+  type RoleReqInput,
+  cloneRoleRequirements,
+  replaceRoleRequirements,
+  resolveRoleRequirements,
+  sumRoleTotals,
+} from '@/lib/coverage/roles'
+
+/** Clave natural de un slot de plantilla. */
+const tplKey = (s: any) => `${s.dayOfWeek}|${s.startTime}|${s.endTime}`
 
 // ── Obtener todos los slots de cobertura ───────────────────────────────────
 export async function getCoverageRequirements(locationId: string) {
   return prisma.coverageRequirement.findMany({
     where: { locationId },
-    include: { laborRole: true, skill: true },
+    include: {
+      laborRole: true,
+      skill: true,
+      roleRequirements: { include: { laborRole: true }, orderBy: { createdAt: 'asc' } },
+    } as any,
     orderBy: [{ dayOfWeek: 'asc' }, { startTime: 'asc' }],
   })
 }
@@ -21,13 +43,23 @@ export async function upsertCoverageSlot(data: {
   dayOfWeek: number
   startTime: string
   endTime: string
-  minWorkers: number
-  idealWorkers: number
+  minWorkers?: number
+  idealWorkers?: number
+  roles?: RoleReqInput[]
   laborRoleId?: string | null
   skillId?: string | null
   isRequired: boolean
   notes?: string
 }) {
+  // El desglose por rol manda; los totales se derivan de él.
+  const roles = await resolveRoleRequirements(
+    data.organizationId,
+    data.roles,
+    { minWorkers: data.minWorkers ?? 1, idealWorkers: data.idealWorkers ?? 1 },
+    data.laborRoleId,
+  )
+  const totals = sumRoleTotals(roles)
+
   const payload = {
     locationId: data.locationId,
     organizationId: data.organizationId,
@@ -35,8 +67,8 @@ export async function upsertCoverageSlot(data: {
     dayOfWeek: data.dayOfWeek,
     startTime: data.startTime,
     endTime: data.endTime,
-    minWorkers: data.minWorkers,
-    idealWorkers: data.idealWorkers,
+    minWorkers: totals.minWorkers,
+    idealWorkers: totals.idealWorkers,
     laborRoleId: data.laborRoleId || null,
     skillId: data.skillId || null,
     isRequired: data.isRequired,
@@ -77,11 +109,14 @@ export async function upsertCoverageSlot(data: {
     }
   }
 
+  await replaceRoleRequirements([slot.id], roles)
+
   revalidatePath('/coverage')
   return slot
 }
 
 // ── Borrar un slot ─────────────────────────────────────────────────────────
+// Las filas de rol caen por onDelete: Cascade.
 export async function deleteCoverageSlot(id: string) {
   await prisma.coverageRequirement.delete({ where: { id } })
   revalidatePath('/coverage')
@@ -100,7 +135,10 @@ export async function copyDaySlots(
     ? { locationId, dayOfWeek: fromDay, templateId }
     : { locationId, dayOfWeek: fromDay }
 
-  const source = await prisma.coverageRequirement.findMany({ where })
+  const source = await prisma.coverageRequirement.findMany({
+    where,
+    include: { roleRequirements: true } as any,
+  })
 
   // Borrar destino (solo slots de la misma plantilla si aplica)
   await prisma.coverageRequirement.deleteMany({
@@ -128,6 +166,20 @@ export async function copyDaySlots(
         priority: s.priority,
       })),
     })
+
+    // Arrastrar el desglose por rol a los slots recién creados
+    const created = await prisma.coverageRequirement.findMany({
+      where: templateId
+        ? { locationId, dayOfWeek: toDay, templateId }
+        : { locationId, dayOfWeek: toDay },
+      select: { id: true, dayOfWeek: true, startTime: true, endTime: true },
+    })
+    await cloneRoleRequirements(
+      source as any,
+      s => `${s.startTime}|${s.endTime}`,
+      created,
+      t => `${t.startTime}|${t.endTime}`,
+    )
   }
 
   revalidatePath('/coverage')
@@ -222,6 +274,29 @@ export async function loadCoverageTemplate(
         priority: 1,
       })),
     })
+
+    // Estas plantillas no traen desglose por rol: se asigna el rol base con
+    // los totales, para que ningún slot quede sin demanda definida.
+    const created = await prisma.coverageRequirement.findMany({
+      where: templateId ? { locationId, templateId } : { locationId },
+      select: { id: true, minWorkers: true, idealWorkers: true },
+    })
+
+    const byTotals = new Map<string, string[]>()
+    for (const c of created) {
+      const k = `${c.minWorkers}|${c.idealWorkers}`
+      const arr = byTotals.get(k)
+      if (arr) arr.push(c.id)
+      else byTotals.set(k, [c.id])
+    }
+
+    for (const [k, ids] of byTotals) {
+      const [min, ideal] = k.split('|').map(Number)
+      const roles = await resolveRoleRequirements(
+        organizationId, null, { minWorkers: min, idealWorkers: ideal },
+      )
+      await replaceRoleRequirements(ids, roles)
+    }
   }
 
   revalidatePath('/coverage')
@@ -246,6 +321,7 @@ export async function copySlotsBetweenTemplates(
 ) {
   const source = await prisma.coverageRequirement.findMany({
     where: { templateId: fromTemplateId, locationId },
+    include: { roleRequirements: true } as any,
   })
   if (source.length === 0) throw new Error('La plantilla origen no tiene slots configurados')
   await prisma.coverageRequirement.deleteMany({
@@ -268,6 +344,13 @@ export async function copySlotsBetweenTemplates(
       priority: s.priority,
     })),
   })
+
+  const created = await prisma.coverageRequirement.findMany({
+    where: { templateId: toTemplateId, locationId },
+    select: { id: true, dayOfWeek: true, startTime: true, endTime: true },
+  })
+  await cloneRoleRequirements(source as any, tplKey, created, tplKey)
+
   revalidatePath('/coverage')
   return { copied: source.length }
 }
@@ -281,14 +364,23 @@ export async function bulkUpsertSlots(data: {
   days: number[]
   startTime: string
   endTime: string
-  minWorkers: number
-  idealWorkers: number
+  minWorkers?: number
+  idealWorkers?: number
+  roles?: RoleReqInput[]
   laborRoleId?: string | null
   skillId?: string | null
   isRequired: boolean
   notes?: string
 }) {
   const templateIdFilter = data.templateId ?? null
+
+  const roles = await resolveRoleRequirements(
+    data.organizationId,
+    data.roles,
+    { minWorkers: data.minWorkers ?? 1, idealWorkers: data.idealWorkers ?? 1 },
+    data.laborRoleId,
+  )
+  const totals = sumRoleTotals(roles)
 
   // Expandir el rango en franjas de 30 min
   const [sh, sm] = data.startTime.split(':').map(Number)
@@ -337,8 +429,8 @@ export async function bulkUpsertSlots(data: {
           dayOfWeek: day,
           startTime: f.start,
           endTime: f.end,
-          minWorkers: data.minWorkers,
-          idealWorkers: data.idealWorkers,
+          minWorkers: totals.minWorkers,
+          idealWorkers: totals.idealWorkers,
           laborRoleId: data.laborRoleId || null,
           skillId: data.skillId || null,
           isRequired: data.isRequired,
@@ -354,8 +446,8 @@ export async function bulkUpsertSlots(data: {
     await prisma.coverageRequirement.updateMany({
       where: { id: { in: toUpdate } },
       data: {
-        minWorkers: data.minWorkers,
-        idealWorkers: data.idealWorkers,
+        minWorkers: totals.minWorkers,
+        idealWorkers: totals.idealWorkers,
         laborRoleId: data.laborRoleId || null,
         skillId: data.skillId || null,
         isRequired: data.isRequired,
@@ -368,6 +460,18 @@ export async function bulkUpsertSlots(data: {
   if (toCreate.length > 0) {
     await prisma.coverageRequirement.createMany({ data: toCreate })
   }
+
+  // Aplicar el mismo desglose por rol a TODOS los slots afectados (2 queries)
+  const affected = await prisma.coverageRequirement.findMany({
+    where: {
+      locationId: data.locationId,
+      templateId: templateIdFilter,
+      dayOfWeek: { in: data.days },
+      startTime: { in: franjas.map(f => f.start) },
+    },
+    select: { id: true },
+  })
+  await replaceRoleRequirements(affected.map(a => a.id), roles)
 
   revalidatePath('/coverage')
   return { updated: toUpdate.length, created: toCreate.length }
@@ -383,7 +487,13 @@ export async function generateSlotsForDay(
   defaultMin: number,
   defaultIdeal: number,
   templateId?: string | null,
+  roles?: RoleReqInput[],
 ) {
+  const resolved = await resolveRoleRequirements(
+    organizationId, roles, { minWorkers: defaultMin, idealWorkers: defaultIdeal },
+  )
+  const totals = sumRoleTotals(resolved)
+
   // Borrar slots del día (filtrando por plantilla si aplica)
   await prisma.coverageRequirement.deleteMany({
     where: templateId
@@ -411,8 +521,8 @@ export async function generateSlotsForDay(
       dayOfWeek,
       startTime: startStr,
       endTime: endStr === '00:00' ? '00:00' : endStr,
-      minWorkers: defaultMin,
-      idealWorkers: defaultIdeal,
+      minWorkers: totals.minWorkers,
+      idealWorkers: totals.idealWorkers,
       isRequired: true,
       priority: 1,
     })
@@ -420,6 +530,15 @@ export async function generateSlotsForDay(
   }
 
   await prisma.coverageRequirement.createMany({ data: slots })
+
+  const created = await prisma.coverageRequirement.findMany({
+    where: templateId
+      ? { locationId, dayOfWeek, templateId }
+      : { locationId, dayOfWeek },
+    select: { id: true },
+  })
+  await replaceRoleRequirements(created.map(c => c.id), resolved)
+
   revalidatePath('/coverage')
   return { generated: slots.length }
 }

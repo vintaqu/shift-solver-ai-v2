@@ -8,10 +8,22 @@
 // Herencia: si una semana no tiene cobertura configurada, se copia
 // automáticamente de la semana anterior; si tampoco existe, se genera
 // desde la plantilla activa.
+//
+// Demanda por ROL: cada slot lleva un desglose (CoverageRoleRequirement)
+// con min/ideal por rol. `minWorkers` / `idealWorkers` del slot son la suma
+// denormalizada de ese desglose. TODAS las operaciones de copia arrastran
+// el desglose de los slots origen mediante un único createMany.
 // ============================================================
 
 import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/prisma'
+import {
+  type RoleReqInput,
+  cloneRoleRequirements,
+  replaceRoleRequirements,
+  resolveRoleRequirements,
+  sumRoleTotals,
+} from '@/lib/coverage/roles'
 
 // ── Helpers de fechas (siempre UTC midnight para evitar shifts de zona) ─────
 function toUTCDate(iso: string): Date {
@@ -30,6 +42,16 @@ function dayOfWeekMon0(date: Date): number {
   return (date.getUTCDay() + 6) % 7
 }
 
+/** Clave natural de un slot por fecha. */
+const dateKey = (s: any) =>
+  `${(s.date as Date).toISOString().slice(0, 10)}|${s.startTime}|${s.endTime}`
+
+/** Clave natural de un slot de plantilla (sin fecha). */
+const tplKey = (s: any) => `${s.dayOfWeek}|${s.startTime}|${s.endTime}`
+
+/** Include estándar del desglose por rol. */
+const WITH_ROLES = { roleRequirements: true } as any
+
 // ── Obtener la cobertura de una semana ──────────────────────────────────────
 export async function getWeekCoverage(locationId: string, weekStartISO: string) {
   const weekStart = toUTCDate(weekStartISO)
@@ -40,7 +62,11 @@ export async function getWeekCoverage(locationId: string, weekStartISO: string) 
       locationId,
       date: { gte: weekStart, lt: weekEnd },
     },
-    include: { laborRole: true, skill: true },
+    include: {
+      laborRole: true,
+      skill: true,
+      roleRequirements: { include: { laborRole: true }, orderBy: { createdAt: 'asc' } },
+    } as any,
     orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
   })
 }
@@ -69,6 +95,7 @@ export async function ensureWeekCoverage(
   const prevStart = addDaysUTC(weekStart, -7)
   const prevSlots = await prisma.coverageRequirement.findMany({
     where: { locationId, date: { gte: prevStart, lt: weekStart } },
+    include: WITH_ROLES,
   })
 
   if (prevSlots.length > 0) {
@@ -90,6 +117,19 @@ export async function ensureWeekCoverage(
         priority: s.priority,
       })),
     })
+
+    const created = await prisma.coverageRequirement.findMany({
+      where: { locationId, date: { gte: weekStart, lt: weekEnd } },
+      select: { id: true, date: true, startTime: true, endTime: true },
+    })
+    // La clave de origen se desplaza +7 días para casar con el destino.
+    await cloneRoleRequirements(
+      prevSlots as any,
+      s => `${addDaysUTC(s.date as Date, 7).toISOString().slice(0, 10)}|${s.startTime}|${s.endTime}`,
+      created,
+      dateKey,
+    )
+
     revalidatePath('/coverage')
     return { source: 'previous_week' as const, count: prevSlots.length }
   }
@@ -102,6 +142,7 @@ export async function ensureWeekCoverage(
   if (activeTemplate) {
     const templateSlots = await prisma.coverageRequirement.findMany({
       where: { locationId, templateId: activeTemplate.id, date: null },
+      include: WITH_ROLES,
     })
 
     if (templateSlots.length > 0) {
@@ -123,6 +164,13 @@ export async function ensureWeekCoverage(
           priority: s.priority,
         })),
       })
+
+      const created = await prisma.coverageRequirement.findMany({
+        where: { locationId, date: { gte: weekStart, lt: weekEnd } },
+        select: { id: true, dayOfWeek: true, startTime: true, endTime: true },
+      })
+      await cloneRoleRequirements(templateSlots as any, tplKey, created, tplKey)
+
       revalidatePath('/coverage')
       return { source: 'template' as const, count: templateSlots.length }
     }
@@ -146,6 +194,7 @@ export async function copyWeekCoverage(
 
   const source = await prisma.coverageRequirement.findMany({
     where: { locationId, date: { gte: fromStart, lt: fromEnd } },
+    include: WITH_ROLES,
   })
   if (source.length === 0) throw new Error('La semana origen no tiene cobertura configurada')
 
@@ -173,6 +222,17 @@ export async function copyWeekCoverage(
     })),
   })
 
+  const created = await prisma.coverageRequirement.findMany({
+    where: { locationId, date: { gte: toStart, lt: toEnd } },
+    select: { id: true, date: true, startTime: true, endTime: true },
+  })
+  await cloneRoleRequirements(
+    source as any,
+    s => `${addDaysUTC(s.date as Date, offsetDays).toISOString().slice(0, 10)}|${s.startTime}|${s.endTime}`,
+    created,
+    dateKey,
+  )
+
   revalidatePath('/coverage')
   return { copied: source.length }
 }
@@ -189,6 +249,7 @@ export async function copyDayCoverage(
 
   const source = await prisma.coverageRequirement.findMany({
     where: { locationId, date: fromDate },
+    include: WITH_ROLES,
   })
   if (source.length === 0) throw new Error('El día origen no tiene cobertura configurada')
 
@@ -215,6 +276,17 @@ export async function copyDayCoverage(
     })),
   })
 
+  const created = await prisma.coverageRequirement.findMany({
+    where: { locationId, date: toDate },
+    select: { id: true, startTime: true, endTime: true },
+  })
+  await cloneRoleRequirements(
+    source as any,
+    s => `${s.startTime}|${s.endTime}`,
+    created,
+    t => `${t.startTime}|${t.endTime}`,
+  )
+
   revalidatePath('/coverage')
   return { copied: source.length }
 }
@@ -227,14 +299,24 @@ export async function upsertDateSlot(data: {
   dateISO: string
   startTime: string
   endTime: string
-  minWorkers: number
-  idealWorkers: number
+  minWorkers?: number
+  idealWorkers?: number
+  roles?: RoleReqInput[]
   laborRoleId?: string | null
   skillId?: string | null
   isRequired: boolean
   notes?: string
 }) {
   const date = toUTCDate(data.dateISO)
+
+  const roles = await resolveRoleRequirements(
+    data.organizationId,
+    data.roles,
+    { minWorkers: data.minWorkers ?? 1, idealWorkers: data.idealWorkers ?? 1 },
+    data.laborRoleId,
+  )
+  const totals = sumRoleTotals(roles)
+
   const payload = {
     locationId: data.locationId,
     organizationId: data.organizationId,
@@ -242,8 +324,8 @@ export async function upsertDateSlot(data: {
     date,
     startTime: data.startTime,
     endTime: data.endTime,
-    minWorkers: data.minWorkers,
-    idealWorkers: data.idealWorkers,
+    minWorkers: totals.minWorkers,
+    idealWorkers: totals.idealWorkers,
     laborRoleId: data.laborRoleId || null,
     skillId: data.skillId || null,
     isRequired: data.isRequired,
@@ -268,6 +350,8 @@ export async function upsertDateSlot(data: {
       : await prisma.coverageRequirement.create({ data: payload })
   }
 
+  await replaceRoleRequirements([slot.id], roles)
+
   revalidatePath('/coverage')
   return slot
 }
@@ -279,14 +363,23 @@ export async function bulkUpsertDateSlots(data: {
   datesISO: string[]      // fechas concretas seleccionadas
   startTime: string
   endTime: string
-  minWorkers: number
-  idealWorkers: number
+  minWorkers?: number
+  idealWorkers?: number
+  roles?: RoleReqInput[]
   laborRoleId?: string | null
   skillId?: string | null
   isRequired: boolean
   notes?: string
 }) {
   const dates = data.datesISO.map(toUTCDate)
+
+  const roles = await resolveRoleRequirements(
+    data.organizationId,
+    data.roles,
+    { minWorkers: data.minWorkers ?? 1, idealWorkers: data.idealWorkers ?? 1 },
+    data.laborRoleId,
+  )
+  const totals = sumRoleTotals(roles)
 
   // Expandir el rango en franjas de 30 min
   const [sh, sm] = data.startTime.split(':').map(Number)
@@ -320,9 +413,9 @@ export async function bulkUpsertDateSlots(data: {
   const toUpdate: string[] = []
 
   for (const date of dates) {
-    const dateKey = date.toISOString().slice(0, 10)
+    const dKey = date.toISOString().slice(0, 10)
     for (const f of franjas) {
-      const found = existingMap.get(`${dateKey}|${f.start}`)
+      const found = existingMap.get(`${dKey}|${f.start}`)
       if (found) {
         toUpdate.push(found.id)
       } else {
@@ -333,8 +426,8 @@ export async function bulkUpsertDateSlots(data: {
           date,
           startTime: f.start,
           endTime: f.end,
-          minWorkers: data.minWorkers,
-          idealWorkers: data.idealWorkers,
+          minWorkers: totals.minWorkers,
+          idealWorkers: totals.idealWorkers,
           laborRoleId: data.laborRoleId || null,
           skillId: data.skillId || null,
           isRequired: data.isRequired,
@@ -349,8 +442,8 @@ export async function bulkUpsertDateSlots(data: {
     await prisma.coverageRequirement.updateMany({
       where: { id: { in: toUpdate } },
       data: {
-        minWorkers: data.minWorkers,
-        idealWorkers: data.idealWorkers,
+        minWorkers: totals.minWorkers,
+        idealWorkers: totals.idealWorkers,
         laborRoleId: data.laborRoleId || null,
         skillId: data.skillId || null,
         isRequired: data.isRequired,
@@ -362,6 +455,17 @@ export async function bulkUpsertDateSlots(data: {
   if (toCreate.length > 0) {
     await prisma.coverageRequirement.createMany({ data: toCreate })
   }
+
+  // Mismo desglose por rol para todos los slots afectados (2 queries en total)
+  const affected = await prisma.coverageRequirement.findMany({
+    where: {
+      locationId: data.locationId,
+      date: { in: dates },
+      startTime: { in: franjas.map(f => f.start) },
+    },
+    select: { id: true },
+  })
+  await replaceRoleRequirements(affected.map(a => a.id), roles)
 
   revalidatePath('/coverage')
   return { updated: toUpdate.length, created: toCreate.length }
@@ -383,6 +487,7 @@ export async function regenerateWeekFromTemplate(
 
   const templateSlots = await prisma.coverageRequirement.findMany({
     where: { locationId, templateId: activeTemplate.id, date: null },
+    include: WITH_ROLES,
   })
   if (templateSlots.length === 0) throw new Error('La plantilla activa no tiene slots configurados')
 
@@ -409,6 +514,12 @@ export async function regenerateWeekFromTemplate(
     })),
   })
 
+  const created = await prisma.coverageRequirement.findMany({
+    where: { locationId, date: { gte: weekStart, lt: weekEnd } },
+    select: { id: true, dayOfWeek: true, startTime: true, endTime: true },
+  })
+  await cloneRoleRequirements(templateSlots as any, tplKey, created, tplKey)
+
   revalidatePath('/coverage')
   return { count: templateSlots.length, templateName: activeTemplate.name }
 }
@@ -425,6 +536,7 @@ export async function saveWeekAsTemplate(
 
   const weekSlots = await prisma.coverageRequirement.findMany({
     where: { locationId, date: { gte: weekStart, lt: weekEnd } },
+    include: WITH_ROLES,
   })
   if (weekSlots.length === 0) throw new Error('Esta semana no tiene cobertura que guardar')
 
@@ -459,6 +571,12 @@ export async function saveWeekAsTemplate(
     })),
   })
 
+  const created = await prisma.coverageRequirement.findMany({
+    where: { locationId, templateId: template.id, date: null },
+    select: { id: true, dayOfWeek: true, startTime: true, endTime: true },
+  })
+  await cloneRoleRequirements(weekSlots as any, tplKey, created, tplKey)
+
   revalidatePath('/coverage')
   return { templateId: template.id, name: template.name, count: weekSlots.length }
 }
@@ -478,6 +596,7 @@ export async function importTemplateToWeek(
 
   const templateSlots = await prisma.coverageRequirement.findMany({
     where: { locationId, templateId, date: null },
+    include: WITH_ROLES,
   })
   if (templateSlots.length === 0) throw new Error('La plantilla no tiene slots configurados')
 
@@ -504,6 +623,12 @@ export async function importTemplateToWeek(
     })),
   })
 
+  const created = await prisma.coverageRequirement.findMany({
+    where: { locationId, date: { gte: weekStart, lt: weekEnd } },
+    select: { id: true, dayOfWeek: true, startTime: true, endTime: true },
+  })
+  await cloneRoleRequirements(templateSlots as any, tplKey, created, tplKey)
+
   revalidatePath('/coverage')
   return { count: templateSlots.length, templateName: template.name }
 }
@@ -526,4 +651,13 @@ export async function deleteDateSlot(id: string) {
   await prisma.coverageRequirement.delete({ where: { id } })
   revalidatePath('/coverage')
   return { success: true }
+}
+
+// ── Roles disponibles para el editor de desglose ────────────────────────────
+export async function getLaborRolesForCoverage(organizationId: string) {
+  return prisma.laborRole.findMany({
+    where: { organizationId },
+    select: { id: true, name: true, color: true, level: true, priority: true },
+    orderBy: [{ priority: 'asc' }, { name: 'asc' }],
+  })
 }
