@@ -14,6 +14,7 @@ import {
   copyWeekCoverage, copyDayCoverage, clearWeekCoverage, regenerateWeekFromTemplate,
   saveWeekAsTemplate, importTemplateToWeek,
 } from '@/server/actions/coverageWeekly'
+import { RoleRequirementsEditor, initialRoleRows, type RoleRow } from './RoleRequirementsEditor'
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 const DAYS_SHORT = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
@@ -119,6 +120,7 @@ interface Slot {
   isRequired: boolean
   notes?: string | null
   laborRole?: any
+  roleRequirements?: any[]
 }
 
 interface Props {
@@ -350,13 +352,22 @@ export function CoverageWeeklyClient({
                             <span className="text-[12px] font-semibold" style={{ color: colors!.text, opacity: 0.7 }}>/{slot.idealWorkers}</span>
                           )}
                         </div>
-                        {(slot.laborRole || slot.notes) && (
+                        {((slot.roleRequirements && slot.roleRequirements.length > 0) || slot.laborRole || slot.notes) && (
                           <div className="pl-1.5 mt-0.5 flex items-center gap-1 flex-wrap">
-                            {slot.laborRole && (
+                            {slot.roleRequirements && slot.roleRequirements.length > 0 ? (
+                              slot.roleRequirements.map((rr: any) => (
+                                <span key={rr.laborRoleId ?? rr.id}
+                                  className="text-[8px] font-semibold px-1 rounded text-white leading-tight"
+                                  style={{ backgroundColor: rr.laborRole?.color ?? '#9ca3af' }}
+                                  title={`${rr.laborRole?.name ?? 'Rol'}: mín ${rr.minWorkers} / ideal ${rr.idealWorkers}`}>
+                                  {(rr.laborRole?.name?.split(' ')[0] ?? '?')} {rr.minWorkers}
+                                </span>
+                              ))
+                            ) : slot.laborRole ? (
                               <span className="text-[8px] font-semibold px-1 rounded text-white leading-tight" style={{ backgroundColor: slot.laborRole.color }}>
                                 {slot.laborRole.name.split(' ')[0]}
                               </span>
-                            )}
+                            ) : null}
                             {slot.notes && <span className="text-[8px] text-gray-500" title={slot.notes}>📝</span>}
                           </div>
                         )}
@@ -476,13 +487,19 @@ function SlotModal({ slot, defaultDate, defaultTime, weekDates, locationId, orga
     dates: isEdit ? [slot.date] : [defaultDate],
     startTime: slot?.startTime ?? defaultTime,
     endTime: slot?.endTime ?? nextSlot(defaultTime),
-    minWorkers: slot?.minWorkers ?? 2,
-    idealWorkers: slot?.idealWorkers ?? 2,
-    laborRoleId: slot?.laborRoleId ?? '',
     isRequired: slot?.isRequired ?? true,
     notes: slot?.notes ?? '',
   })
-  const colors = demandColor(form.minWorkers)
+  // Desglose por rol — fuente de verdad de la demanda del slot.
+  const [roleRows, setRoleRows] = useState<RoleRow[]>(() => initialRoleRows(slot, roles))
+
+  // Total derivado (para el color de la cabecera y validación).
+  const totals = useMemo(() => {
+    let min = 0, ideal = 0
+    for (const r of roleRows) { min += r.minWorkers; ideal += r.idealWorkers }
+    return { min, ideal }
+  }, [roleRows])
+  const colors = demandColor(totals.min)
 
   const franjas = useMemo(() => {
     const [sh, sm] = form.startTime.split(':').map(Number)
@@ -549,44 +566,13 @@ function SlotModal({ slot, defaultDate, defaultTime, weekDates, locationId, orga
             </div>
           </Field>
 
-          <Field label="Personas necesarias">
-            <div className="flex gap-6">
-              <div>
-                <div className="text-[11px] text-gray-400 mb-1">Mínimo</div>
-                <div className="flex items-center gap-2">
-                  <button onClick={() => setForm(f => ({ ...f, minWorkers: Math.max(0, f.minWorkers - 1) }))} className="w-8 h-8 rounded-lg bg-gray-100 font-bold hover:bg-gray-200">−</button>
-                  <span className="text-[20px] font-bold w-8 text-center" style={{ color: colors.bar }}>{form.minWorkers}</span>
-                  <button onClick={() => setForm(f => ({ ...f, minWorkers: f.minWorkers + 1 }))} className="w-8 h-8 rounded-lg bg-gray-100 font-bold hover:bg-gray-200">+</button>
-                </div>
-              </div>
-              <div>
-                <div className="text-[11px] text-gray-400 mb-1">Ideal</div>
-                <div className="flex items-center gap-2">
-                  <button onClick={() => setForm(f => ({ ...f, idealWorkers: Math.max(f.minWorkers, f.idealWorkers - 1) }))} className="w-8 h-8 rounded-lg bg-gray-100 font-bold hover:bg-gray-200">−</button>
-                  <span className="text-[20px] font-bold text-gray-800 w-8 text-center">{form.idealWorkers}</span>
-                  <button onClick={() => setForm(f => ({ ...f, idealWorkers: f.idealWorkers + 1 }))} className="w-8 h-8 rounded-lg bg-gray-100 font-bold hover:bg-gray-200">+</button>
-                </div>
-              </div>
-            </div>
+          <Field label="Necesidades por rol">
+            <RoleRequirementsEditor
+              value={roleRows}
+              onChange={setRoleRows}
+              roles={roles}
+            />
           </Field>
-
-          {roles.length > 0 && (
-            <Field label="Rol requerido (opcional)">
-              <div className="flex flex-wrap gap-2">
-                <button onClick={() => setForm(f => ({ ...f, laborRoleId: '' }))}
-                  className={cn('px-3 py-1.5 rounded-lg text-[12px] font-semibold border-2 transition-all', !form.laborRoleId ? 'border-gray-400 bg-gray-100 text-gray-700' : 'border-gray-200 text-gray-400 hover:border-gray-300')}>
-                  Cualquiera
-                </button>
-                {roles.map((r: any) => (
-                  <button key={r.id} onClick={() => setForm(f => ({ ...f, laborRoleId: f.laborRoleId === r.id ? '' : r.id }))}
-                    className={cn('px-3 py-1.5 rounded-lg text-[12px] font-semibold border-2 text-white transition-all', form.laborRoleId === r.id ? 'scale-105' : 'opacity-50 hover:opacity-75')}
-                    style={{ backgroundColor: r.color, borderColor: r.color }}>
-                    {r.name}
-                  </button>
-                ))}
-              </div>
-            </Field>
-          )}
 
           <div className={cn('flex items-start gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition-all', form.isRequired ? 'border-red-300 bg-red-50' : 'border-gray-200 bg-white')}
             onClick={() => setForm(f => ({ ...f, isRequired: !f.isRequired }))}>
@@ -634,23 +620,26 @@ function SlotModal({ slot, defaultDate, defaultTime, weekDates, locationId, orga
             )}
           </div>
           <button
-            disabled={isPending || (!isEdit && form.dates.length === 0)}
+            disabled={isPending || (!isEdit && form.dates.length === 0) || roleRows.length === 0 || totals.ideal === 0}
             onClick={() => startTransition(async () => {
               try {
+                const rolesPayload = roleRows.map(r => ({
+                  laborRoleId: r.laborRoleId,
+                  minWorkers: r.minWorkers,
+                  idealWorkers: r.idealWorkers,
+                }))
                 if (isEdit) {
                   await upsertDateSlot({
                     id: slot.id, locationId, organizationId, dateISO: slot.date,
                     startTime: form.startTime, endTime: form.endTime,
-                    minWorkers: form.minWorkers, idealWorkers: form.idealWorkers,
-                    laborRoleId: form.laborRoleId || null, isRequired: form.isRequired, notes: form.notes,
+                    roles: rolesPayload, isRequired: form.isRequired, notes: form.notes,
                   })
                   toast.success('Slot actualizado ✓')
                 } else {
                   const result = await bulkUpsertDateSlots({
                     locationId, organizationId, datesISO: form.dates,
                     startTime: form.startTime, endTime: form.endTime,
-                    minWorkers: form.minWorkers, idealWorkers: form.idealWorkers,
-                    laborRoleId: form.laborRoleId || null, isRequired: form.isRequired, notes: form.notes,
+                    roles: rolesPayload, isRequired: form.isRequired, notes: form.notes,
                   })
                   const parts = []
                   if (result.updated > 0) parts.push(`${result.updated} actualizados`)
