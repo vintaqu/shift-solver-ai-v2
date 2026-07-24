@@ -10,7 +10,15 @@ export async function getActiveTemplate(locationId: string) {
   const now = new Date()
   const templates = await prisma.coverageTemplate.findMany({
     where: { locationId },
-    include: { coverageRequirements: { include: { laborRole: true, skill: true } } },
+    include: {
+      coverageRequirements: {
+        include: {
+          laborRole: true,
+          skill: true,
+          roleRequirements: { include: { laborRole: true } },
+        },
+      },
+    } as any,
   })
 
   // 1. Buscar activa MANUAL que no haya expirado

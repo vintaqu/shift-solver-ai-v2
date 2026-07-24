@@ -148,61 +148,83 @@ function mapCoverageToFranjas(slots: any[]): {
     // Ordenar por hora inicio
     const sorted = [...daySlots].sort((a, b) => a.startTime.localeCompare(b.startTime))
 
-    // Consolidar franjas contiguas con misma demanda (reduce el tamaño del payload)
-    // Pero el solver acepta franjas solapadas o no contiguas, así que enviamos todo
     for (const slot of sorted) {
-      // Numérica
-      const existingNum = franjas_num[dia].find(
+      // ── Desglose por rol (fuente de verdad) ──────────────────────────────
+      // Construimos personas_por_rol = { ROL_SOLVER: {min, ideal} } sumando
+      // las filas roleRequirements del slot. Si un slot no trae desglose
+      // (datos legacy sin migrar), caemos al reparto histórico basado en
+      // laborRole + minWorkers para no perder cobertura.
+      const roleReqs: any[] = slot.roleRequirements ?? []
+
+      const personas_por_rol: Record<string, { min: number; ideal: number }> = {}
+
+      if (roleReqs.length > 0) {
+        for (const rr of roleReqs) {
+          const level = rr.laborRole?.level
+          const rolSolver = LEVEL_TO_ROL[level] ?? 'CAMARERO_BASICO'
+          const prev = personas_por_rol[rolSolver] ?? { min: 0, ideal: 0 }
+          prev.min += rr.minWorkers ?? 0
+          prev.ideal += rr.idealWorkers ?? rr.minWorkers ?? 0
+          personas_por_rol[rolSolver] = prev
+        }
+      } else {
+        // Fallback legacy: reparto histórico (1 del rol requerido + resto CB).
+        const min = slot.minWorkers ?? 0
+        const ideal = slot.idealWorkers ?? min
+        if (slot.laborRole && LEVEL_TO_ROL[slot.laborRole.level] &&
+            LEVEL_TO_ROL[slot.laborRole.level] !== 'CAMARERO_BASICO') {
+          const rolSolver = LEVEL_TO_ROL[slot.laborRole.level]
+          personas_por_rol[rolSolver] = { min: Math.min(1, min) || 1, ideal: 1 }
+          const restoMin = Math.max(0, min - 1)
+          const restoIdeal = Math.max(restoMin, ideal - 1)
+          if (restoIdeal > 0) {
+            personas_por_rol['CAMARERO_BASICO'] = { min: restoMin, ideal: restoIdeal }
+          }
+        } else {
+          personas_por_rol['CAMARERO_BASICO'] = { min, ideal }
+        }
+      }
+
+      // Empujar la franja de rol (con min/ideal reales)
+      const existingRol = franjas_rol[dia].find(
         f => f.inicio === slot.startTime && f.fin === slot.endTime
       )
-      if (!existingNum) {
-        franjas_num[dia].push({
+      if (existingRol) {
+        // Combinar (poco habitual: dos slots mismo horario). Sumamos.
+        for (const [rol, dem] of Object.entries(personas_por_rol)) {
+          const cur = (existingRol.personas_por_rol[rol] as any) ?? { min: 0, ideal: 0 }
+          const curNorm = typeof cur === 'number' ? { min: cur, ideal: cur } : cur
+          existingRol.personas_por_rol[rol] = {
+            min: curNorm.min + dem.min,
+            ideal: curNorm.ideal + dem.ideal,
+          }
+        }
+      } else {
+        franjas_rol[dia].push({
           inicio: slot.startTime,
           fin: slot.endTime,
-          personas: slot.minWorkers,
+          personas_por_rol,
         })
       }
 
-      // Rol — si el slot tiene laborRole, añadirlo; si no, solo camarero básico
-      if (slot.laborRole) {
-        const rolSolver = LEVEL_TO_ROL[slot.laborRole.level] ?? 'CAMARERO_BASICO'
-        const existingRol = franjas_rol[dia].find(
-          f => f.inicio === slot.startTime && f.fin === slot.endTime
-        )
-        if (existingRol) {
-          existingRol.personas_por_rol[rolSolver] =
-            (existingRol.personas_por_rol[rolSolver] ?? 0) + 1
-        } else {
-          // Distribuir: 1 del rol requerido, resto camarero básico
-          const personas_por_rol: Record<string, number> = {}
-          if (rolSolver === 'CAMARERO_BASICO') {
-            personas_por_rol['CAMARERO_BASICO'] = slot.minWorkers
-          } else {
-            personas_por_rol[rolSolver] = 1
-            const resto = slot.minWorkers - 1
-            if (resto > 0) personas_por_rol['CAMARERO_BASICO'] = resto
-          }
-          franjas_rol[dia].push({
-            inicio: slot.startTime,
-            fin: slot.endTime,
-            personas_por_rol,
-          })
-        }
+      // ── Numérica (derivada: suma de mínimos) ─────────────────────────────
+      // El solver la deriva por su cuenta desde franjas_rol, pero la enviamos
+      // igualmente para requests legacy y como red de seguridad.
+      const minTotal = Object.values(personas_por_rol).reduce((a, d) => a + d.min, 0)
+      const existingNum = franjas_num[dia].find(
+        f => f.inicio === slot.startTime && f.fin === slot.endTime
+      )
+      if (existingNum) {
+        existingNum.personas += minTotal
       } else {
-        // Sin rol específico → todo camarero básico
-        const existing = franjas_rol[dia].find(
-          f => f.inicio === slot.startTime && f.fin === slot.endTime
-        )
-        if (!existing) {
-          franjas_rol[dia].push({
-            inicio: slot.startTime,
-            fin: slot.endTime,
-            personas_por_rol: { CAMARERO_BASICO: slot.minWorkers },
-          })
-        }
+        franjas_num[dia].push({
+          inicio: slot.startTime,
+          fin: slot.endTime,
+          personas: minTotal,
+        })
       }
 
-      // Etiqueta
+      // ── Etiqueta ─────────────────────────────────────────────────────────
       if (slot.skill) {
         const existing = franjas_eti[dia].find(
           f => f.inicio === slot.startTime && f.fin === slot.endTime

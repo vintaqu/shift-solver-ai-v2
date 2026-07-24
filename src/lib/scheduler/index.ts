@@ -57,10 +57,17 @@ export interface FranjaNum {
   personas: number
 }
 
+export interface DemandaRol {
+  min: number
+  ideal: number
+}
+
 export interface FranjaRol {
   inicio: string
   fin: string
-  personas_por_rol: Record<string, number>
+  // Cada rol lleva su min (duro) e ideal (blando). Se acepta también el
+  // formato antiguo (number) por retrocompatibilidad con el solver.
+  personas_por_rol: Record<string, DemandaRol | number>
 }
 
 export interface FranjaEti {
@@ -122,6 +129,8 @@ export interface HuecoCobertura {
   cubierto: number
   falta_personas: number
   falta_por_nivel: Record<string, number>
+  falta_ideal?: number
+  demanda_ideal?: number
 }
 
 export interface HuecoEtiqueta {
