@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils'
 import { createAssignment, updateAssignment, moveAssignment, deleteAssignment, toggleAssignmentLock, publishPlanningPeriod } from '@/server/actions/planning'
 import { updateEmployeeOrder } from '@/server/actions/employees'
 import { upsertDateSlot, deleteDateSlot } from '@/server/actions/coverageWeekly'
+import { RoleRequirementsEditor, initialRoleRows, type RoleRow } from '@/components/coverage/RoleRequirementsEditor'
 import { GenerateModal } from './GenerateModal'
 
 // ─── Paleta de colores por empleado ───────────────────────────────────────────
@@ -226,9 +227,19 @@ export function PlannerClientPage({ period, employees: allEmployees, weekDays, a
     return new Date(weekDays[dayIdx]).toISOString().slice(0, 10)
   }
 
+  // Un slot pasa el filtro si alguno de sus roles está seleccionado.
+  // Nuevo modelo: mira roleRequirements; fallback legacy: campo laborRoleId.
+  function slotMatchesRoleFilter(r: any): boolean {
+    if (roleFilter.length === 0) return true
+    if (r.roleRequirements && r.roleRequirements.length > 0) {
+      return r.roleRequirements.some((rr: any) => roleFilter.includes(rr.laborRoleId))
+    }
+    return roleFilter.includes(r.laborRoleId)
+  }
+
   function dayCoverage(dayIdx: number) {
     let reqs = coverageByDate[dateISOForDay(dayIdx)] || []
-    if (roleFilter.length > 0) reqs = reqs.filter((r: any) => roleFilter.includes(r.laborRoleId))
+    if (roleFilter.length > 0) reqs = reqs.filter(slotMatchesRoleFilter)
     const maxReq = reqs.length > 0 ? Math.max(...reqs.map((r: any) => r.minWorkers)) : 0
     const working = employees.filter(e =>
       (assignmentsByEmpDay[e.id]?.[dayIdx] || []).length > 0
@@ -240,7 +251,7 @@ export function PlannerClientPage({ period, employees: allEmployees, weekDays, a
   function franjaCoverage(dayIdx: number) {
     const dateISO = dateISOForDay(dayIdx)
     let reqs = (coverageByDate[dateISO] || []).slice().sort((a, b) => a.startTime.localeCompare(b.startTime))
-    if (roleFilter.length > 0) reqs = reqs.filter((r: any) => roleFilter.includes(r.laborRoleId))
+    if (roleFilter.length > 0) reqs = reqs.filter(slotMatchesRoleFilter)
     const dayAssignments = employees.flatMap(e => assignmentsByEmpDay[e.id]?.[dayIdx] || [])
     return reqs.map((r: any) => {
       const reqStart = timeToMin(r.startTime)
@@ -1538,12 +1549,15 @@ function QuickCoverageEditModal({ date, time, slot, roles = [], locationId, orga
   const [isPending, startTransition] = useTransition()
   const [confirmDelete, setConfirmDelete] = useState(false)
   const isEdit = !!slot
-  const [min, setMin] = useState(slot?.minWorkers ?? 2)
-  const [ideal, setIdeal] = useState(slot?.idealWorkers ?? 2)
   const [isRequired, setIsRequired] = useState(slot?.isRequired ?? true)
-  const [laborRoleId, setLaborRoleId] = useState<string>(slot?.laborRoleId ?? '')
   const [notes, setNotes] = useState<string>(slot?.notes ?? '')
-  const colors = demandColor(min)
+  const [roleRows, setRoleRows] = useState<RoleRow[]>(() => initialRoleRows(slot, roles))
+
+  const totals = useMemo(() => {
+    let min = 0, ideal = 0
+    for (const r of roleRows) { min += r.minWorkers; ideal += r.idealWorkers }
+    return { min, ideal }
+  }, [roleRows])
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
@@ -1555,45 +1569,14 @@ function QuickCoverageEditModal({ date, time, slot, roles = [], locationId, orga
         </div>
 
         <div className="px-5 py-4 space-y-4 overflow-y-auto flex-1">
-          <div className="flex gap-6 justify-center">
-            <div className="text-center">
-              <div className="text-[10px] text-gray-400 mb-1.5">Mínimo</div>
-              <div className="flex items-center gap-1.5">
-                <button onClick={() => setMin((m: number) => Math.max(0, m - 1))} className="w-7 h-7 rounded-lg bg-gray-100 font-bold hover:bg-gray-200">−</button>
-                <span className="text-[18px] font-bold w-7 text-center" style={{ color: colors.text }}>{min}</span>
-                <button onClick={() => setMin((m: number) => m + 1)} className="w-7 h-7 rounded-lg bg-gray-100 font-bold hover:bg-gray-200">+</button>
-              </div>
-            </div>
-            <div className="text-center">
-              <div className="text-[10px] text-gray-400 mb-1.5">Ideal</div>
-              <div className="flex items-center gap-1.5">
-                <button onClick={() => setIdeal((i: number) => Math.max(min, i - 1))} className="w-7 h-7 rounded-lg bg-gray-100 font-bold hover:bg-gray-200">−</button>
-                <span className="text-[18px] font-bold text-gray-800 w-7 text-center">{ideal}</span>
-                <button onClick={() => setIdeal((i: number) => i + 1)} className="w-7 h-7 rounded-lg bg-gray-100 font-bold hover:bg-gray-200">+</button>
-              </div>
-            </div>
+          <div>
+            <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Necesidades por rol</div>
+            <RoleRequirementsEditor
+              value={roleRows}
+              onChange={setRoleRows}
+              roles={roles}
+            />
           </div>
-
-          {roles.length > 0 && (
-            <div>
-              <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Rol requerido (opcional)</div>
-              <div className="flex flex-wrap gap-1.5">
-                <button onClick={() => setLaborRoleId('')}
-                  className={cn('px-2.5 py-1 rounded-lg text-[11px] font-semibold border-2 transition-all',
-                    !laborRoleId ? 'border-gray-400 bg-gray-100 text-gray-700' : 'border-gray-200 text-gray-400 hover:border-gray-300')}>
-                  Cualquiera
-                </button>
-                {roles.map((r: any) => (
-                  <button key={r.id} onClick={() => setLaborRoleId(laborRoleId === r.id ? '' : r.id)}
-                    className={cn('px-2.5 py-1 rounded-lg text-[11px] font-semibold border-2 text-white transition-all',
-                      laborRoleId === r.id ? 'scale-105' : 'opacity-50 hover:opacity-75')}
-                    style={{ backgroundColor: r.color, borderColor: r.color }}>
-                    {r.name}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
 
           <div className={cn('flex items-center gap-2 p-2.5 rounded-xl border cursor-pointer transition-all', isRequired ? 'border-red-200 bg-red-50' : 'border-gray-200 bg-white')}
             onClick={() => setIsRequired((v: boolean) => !v)}>
@@ -1635,7 +1618,7 @@ function QuickCoverageEditModal({ date, time, slot, roles = [], locationId, orga
           )}
           {!confirmDelete && (
             <button
-              disabled={isPending}
+              disabled={isPending || roleRows.length === 0 || totals.ideal === 0}
               onClick={() => startTransition(async () => {
                 try {
                   await upsertDateSlot({
@@ -1644,8 +1627,11 @@ function QuickCoverageEditModal({ date, time, slot, roles = [], locationId, orga
                     dateISO: date,
                     startTime: time,
                     endTime: nextHalfHour(time),
-                    minWorkers: min, idealWorkers: ideal,
-                    laborRoleId: laborRoleId || null,
+                    roles: roleRows.map(r => ({
+                      laborRoleId: r.laborRoleId,
+                      minWorkers: r.minWorkers,
+                      idealWorkers: r.idealWorkers,
+                    })),
                     isRequired,
                     notes,
                   })
