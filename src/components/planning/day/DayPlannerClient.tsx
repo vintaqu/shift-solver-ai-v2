@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils'
 import { upsertDateSlot, deleteDateSlot } from '@/server/actions/coverageWeekly'
 import { swapAssignments } from '@/server/actions/planning'
 import { RoleRequirementsEditor, initialRoleRows, type RoleRow } from '@/components/coverage/RoleRequirementsEditor'
-import { employeeColorShades } from '@/lib/employee-color'
+import { employeeColorShades, primaryRoleOf, DEFAULT_EMPLOYEE_COLOR } from '@/lib/employee-color'
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 const DAYS_FULL = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
@@ -125,21 +125,76 @@ export function DayPlannerClient({
     return out
   }, [range])
 
-  // ── Franjas de 30 min con cobertura requerida vs planificada ──
+  // ── Franjas de 30 min con cobertura requerida vs planificada, DESGLOSADA POR ROL ──
+  // Cada rol se cuenta de forma ESTRICTA: solo suman los empleados cuyo rol
+  // principal es exactamente ese (un encargado NO cubre demanda de camarero aquí).
   const franjas = useMemo(() => {
-    const out: Array<{ time: string; required: number; planned: number; slots: any[] }> = []
+    // Mapa empleadoId -> rol principal (id, nombre, color) para conteo estricto.
+    const empRole = new Map<string, { id: string; name: string; color: string } | null>()
+    for (const e of allEmployees) {
+      const r = primaryRoleOf(e)
+      empRole.set(e.id, r ? { id: r.id ?? 'sin', name: r.name ?? 'Rol', color: r.color ?? DEFAULT_EMPLOYEE_COLOR } : null)
+    }
+
+    type RoleBar = { roleId: string; name: string; color: string; min: number; assigned: number }
+    const out: Array<{
+      time: string
+      required: number      // suma de mínimos (todos los roles)
+      planned: number       // total asignados
+      roles: RoleBar[]      // desglose por rol
+      slots: any[]
+    }> = []
+
     for (let m = range.start; m < range.end; m += 30) {
       const time = minToTime(m)
       const slotsHere = coverageSlots.filter((s: any) => s.startTime === time)
-      const required = slotsHere.reduce((acc: number, s: any) => acc + s.minWorkers, 0)
-      const planned = assignments.filter((a: any) => {
+
+      // Demanda mínima por rol (sumando roleRequirements de los slots de la franja).
+      const demandByRole = new Map<string, { name: string; color: string; min: number }>()
+      for (const s of slotsHere) {
+        const reqs: any[] = s.roleRequirements ?? []
+        if (reqs.length > 0) {
+          for (const rr of reqs) {
+            const id = rr.laborRoleId ?? 'sin'
+            const prev = demandByRole.get(id) ?? { name: rr.laborRole?.name ?? 'Rol', color: rr.laborRole?.color ?? DEFAULT_EMPLOYEE_COLOR, min: 0 }
+            prev.min += rr.minWorkers ?? 0
+            demandByRole.set(id, prev)
+          }
+        } else if (s.minWorkers > 0) {
+          // Slot legacy sin desglose: cae en un cubo genérico.
+          const prev = demandByRole.get('__any__') ?? { name: 'Cualquiera', color: '#9ca3af', min: 0 }
+          prev.min += s.minWorkers
+          demandByRole.set('__any__', prev)
+        }
+      }
+
+      // Asignados en esta franja, agrupados por rol principal (estricto).
+      const assignedByRole = new Map<string, number>()
+      let planned = 0
+      for (const a of assignments) {
         const aS = timeToMin(a.startTime), aE = endMin(a.endTime)
-        return m >= aS && m < aE
-      }).length
-      out.push({ time, required, planned, slots: slotsHere })
+        if (m >= aS && m < aE) {
+          planned++
+          const r = empRole.get(a.employeeId)
+          const key = r?.id ?? '__none__'
+          assignedByRole.set(key, (assignedByRole.get(key) ?? 0) + 1)
+        }
+      }
+
+      // Construir las barras por rol. Para slots legacy (__any__) contamos todos.
+      const roles: RoleBar[] = []
+      for (const [roleId, d] of demandByRole) {
+        const assigned = roleId === '__any__' ? planned : (assignedByRole.get(roleId) ?? 0)
+        roles.push({ roleId, name: d.name, color: d.color, min: d.min, assigned })
+      }
+      // Orden estable por nombre para que no bailen entre franjas.
+      roles.sort((a, b) => a.name.localeCompare(b.name))
+
+      const required = roles.reduce((acc, r) => acc + r.min, 0)
+      out.push({ time, required, planned, roles, slots: slotsHere })
     }
     return out
-  }, [range, coverageSlots, assignments])
+  }, [range, coverageSlots, assignments, allEmployees])
 
   const maxBar = Math.max(1, ...franjas.map(f => Math.max(f.required, f.planned)))
 
@@ -313,11 +368,13 @@ export function DayPlannerClient({
                 <div key={m} className="absolute top-0 bottom-0 w-px bg-gray-50" style={{ left: `${pct(m)}%` }} />
               ))}
               {franjas.map((f, i) => {
-                const covered = Math.min(f.planned, f.required)
-                const excess = Math.max(0, f.planned - f.required)
                 const barW = 100 / franjas.length
-                const hUnit = 78 / maxBar // px por persona (dejando sitio para el número)
+                const hUnit = 78 / maxBar // px por persona
                 const isHover = hoverFranja === f.time
+                const totalMinDemand = f.required
+                // Nº de personas que faltan (para el color del número inferior).
+                const totalCovered = f.roles.reduce((acc, r) => acc + Math.min(r.assigned, r.min), 0)
+                const falta = Math.max(0, totalMinDemand - totalCovered)
                 return (
                   <div
                     key={f.time}
@@ -326,27 +383,48 @@ export function DayPlannerClient({
                     onMouseEnter={() => setHoverFranja(f.time)}
                     onMouseLeave={() => setHoverFranja(null)}
                     onClick={() => setQuickEdit({ time: f.time, slot: f.slots[0] ?? null })}
-                    title={`${f.time}: planificado ${f.planned} / necesario ${f.required}`}
+                    title={
+                      f.roles.length > 0
+                        ? `${f.time} — ${f.roles.map(r => `${r.name}: ${r.assigned}/${r.min}`).join(' · ')}`
+                        : `${f.time}: sin cobertura`
+                    }
                   >
                     <div className={cn('absolute inset-x-[15%] top-1 bottom-5 flex items-end justify-center rounded-sm transition-colors', isHover && 'bg-indigo-50')}>
-                      {/* necesidades (fondo gris) */}
-                      {f.required > 0 && (
-                        <div className="absolute bottom-0 inset-x-0 rounded-sm bg-gray-200"
-                          style={{ height: f.required * hUnit }} />
-                      )}
-                      {/* planificado cubierto (azul) */}
-                      {covered > 0 && (
-                        <div className="absolute bottom-0 inset-x-0 rounded-sm bg-indigo-500"
-                          style={{ height: covered * hUnit }} />
-                      )}
-                      {/* exceso (azul claro, encima) */}
-                      {excess > 0 && (
-                        <div className="absolute inset-x-0 rounded-sm bg-indigo-300"
-                          style={{ bottom: covered * hUnit, height: excess * hUnit }} />
+                      {/* Segmentos por rol, apilados de abajo arriba.
+                          Altura ∝ mínimo del rol. Dentro: verde=cubierto, rojo=falta. */}
+                      {f.roles.map((r, ri) => {
+                        // Offset acumulado de los roles previos (para apilar).
+                        const below = f.roles.slice(0, ri).reduce((acc, rr) => acc + rr.min, 0)
+                        const segH = r.min * hUnit
+                        const coveredH = Math.min(r.assigned, r.min) * hUnit
+                        const missingH = segH - coveredH
+                        return (
+                          <div key={r.roleId} className="absolute inset-x-0" style={{ bottom: below * hUnit, height: segH }}>
+                            {/* parte roja (lo que falta) arriba */}
+                            {missingH > 0 && (
+                              <div className="absolute inset-x-0 top-0 bg-red-400/80"
+                                style={{ height: missingH }}
+                                title={`${r.name}: faltan ${r.min - r.assigned}`} />
+                            )}
+                            {/* parte verde (cubierto) abajo */}
+                            {coveredH > 0 && (
+                              <div className="absolute inset-x-0 bottom-0 bg-emerald-500"
+                                style={{ height: coveredH }} />
+                            )}
+                            {/* separador fino entre roles */}
+                            {ri > 0 && <div className="absolute inset-x-0 top-0 h-px bg-white/70" />}
+                          </div>
+                        )
+                      })}
+                      {/* Exceso sobre el mínimo total (gente de más), gris tenue encima */}
+                      {f.planned > f.required && f.required > 0 && (
+                        <div className="absolute inset-x-0 rounded-t-sm bg-indigo-200/60"
+                          style={{ bottom: f.required * hUnit, height: (f.planned - f.required) * hUnit }}
+                          title={`${f.planned - f.required} de más`} />
                       )}
                     </div>
                     <div className={cn('absolute bottom-0.5 inset-x-0 text-center text-[9px] font-mono',
-                      f.planned < f.required ? 'text-red-500 font-bold' : 'text-gray-400')}>
+                      falta > 0 ? 'text-red-500 font-bold' : 'text-emerald-600')}>
                       {f.planned}
                     </div>
                   </div>
@@ -458,8 +536,8 @@ export function DayPlannerClient({
               <span><strong className="text-indigo-600">{assignments.length}</strong> <span className="text-gray-400">turnos</span></span>
               <span><strong className="text-gray-700">{new Set(assignments.map((a: any) => a.employeeId)).size}</strong> <span className="text-gray-400">empleados trabajan</span></span>
               <span>
-                <strong className={cn(franjas.some(f => f.planned < f.required) ? 'text-red-500' : 'text-emerald-600')}>
-                  {franjas.filter(f => f.required > 0 && f.planned >= f.required).length}/{franjas.filter(f => f.required > 0).length}
+                <strong className={cn(franjas.some(f => f.required > 0 && f.roles.some(r => r.assigned < r.min)) ? 'text-red-500' : 'text-emerald-600')}>
+                  {franjas.filter(f => f.required > 0 && f.roles.every(r => r.assigned >= r.min)).length}/{franjas.filter(f => f.required > 0).length}
                 </strong>{' '}
                 <span className="text-gray-400">franjas cubiertas</span>
               </span>
