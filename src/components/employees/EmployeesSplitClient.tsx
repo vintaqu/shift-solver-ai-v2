@@ -1,15 +1,15 @@
 'use client'
 
-import { useState, useTransition, useMemo } from 'react'
+import { useState, useTransition, useMemo, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
   Search, Plus, UserX, ChevronRight, Clock,
-  Briefcase, AlertCircle, Filter
+  Briefcase, AlertCircle, Filter, Copy, X, Loader2, Info,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { EmployeeDetailClient } from './EmployeeDetailClient'
-import { upsertEmployee } from '@/server/actions/employees'
+import { upsertEmployee, duplicateEmployee } from '@/server/actions/employees'
 import { employeeColor } from '@/lib/employee-color'
 
 const ROLE_COLORS: Record<string, string> = {
@@ -36,6 +36,22 @@ export function EmployeesSplitClient({ employees: initial, skills, roles, legalF
   const [filterRole, setFilterRole] = useState('all')
   const [filterStatus, setFilterStatus] = useState<'active' | 'inactive' | 'all'>('active')
   const [showCreate, setShowCreate] = useState(false)
+  const [addMenuOpen, setAddMenuOpen] = useState(false)
+  const [duplicateMode, setDuplicateMode] = useState(false) // elegir empleado a copiar
+  const [duplicating, setDuplicating] = useState<any | null>(null)
+  const addMenuRef = useRef<HTMLDivElement>(null)
+
+  // Cerrar el menú del botón "+" al hacer click fuera.
+  useEffect(() => {
+    if (!addMenuOpen) return
+    const onDoc = (e: MouseEvent) => {
+      if (addMenuRef.current && !addMenuRef.current.contains(e.target as Node)) {
+        setAddMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [addMenuOpen])
 
   const filtered = useMemo(() => employees.filter(e => {
     const matchSearch = `${e.firstName} ${e.lastName}`.toLowerCase().includes(search.toLowerCase())
@@ -66,12 +82,37 @@ export function EmployeesSplitClient({ employees: initial, skills, roles, legalF
               <h1 className="text-[15px] font-bold text-gray-900">Empleados</h1>
               <p className="text-[11px] text-gray-400">{active} activos · {employees.length} total</p>
             </div>
-            <button
-              onClick={() => setShowCreate(true)}
-              className="w-7 h-7 rounded-lg bg-indigo-600 hover:bg-indigo-700 flex items-center justify-center transition-colors"
-            >
-              <Plus size={14} className="text-white" />
-            </button>
+            <div className="relative" ref={addMenuRef}>
+              <button
+                onClick={() => setAddMenuOpen(o => !o)}
+                className="w-7 h-7 rounded-lg bg-indigo-600 hover:bg-indigo-700 flex items-center justify-center transition-colors"
+                title="Añadir empleado"
+              >
+                <Plus size={14} className="text-white" />
+              </button>
+
+              {addMenuOpen && (
+                <div className="absolute right-0 mt-1 w-48 bg-white rounded-xl shadow-lg border border-gray-100 py-1 z-20">
+                  <button
+                    onClick={() => { setAddMenuOpen(false); setShowCreate(true) }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-gray-50 transition-colors"
+                  >
+                    <Plus size={14} className="text-indigo-500" />
+                    <span className="text-[13px] font-medium text-gray-700">Nuevo empleado</span>
+                  </button>
+                  <button
+                    onClick={() => { setAddMenuOpen(false); setDuplicateMode(true) }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-gray-50 transition-colors"
+                  >
+                    <Copy size={14} className="text-indigo-500" />
+                    <div className="min-w-0">
+                      <div className="text-[13px] font-medium text-gray-700">Copiar empleado</div>
+                      <div className="text-[10px] text-gray-400">Duplica contrato, roles y restricciones</div>
+                    </div>
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Búsqueda */}
@@ -117,6 +158,20 @@ export function EmployeesSplitClient({ employees: initial, skills, roles, legalF
             </div>
           ) : (
             <div className="py-1">
+              {duplicateMode && (
+                <div className="mx-2 mb-1 flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-indigo-50 border border-indigo-100">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Copy size={13} className="text-indigo-500 flex-shrink-0" />
+                    <span className="text-[11px] font-medium text-indigo-700 truncate">Elige a quién copiar</span>
+                  </div>
+                  <button
+                    onClick={() => setDuplicateMode(false)}
+                    className="text-[11px] text-indigo-400 hover:text-indigo-600 flex-shrink-0"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              )}
               {filtered.map(emp => {
                 const role = emp.skills?.[0]?.laborRole
                 const contract = emp.contracts?.[0]
@@ -126,10 +181,19 @@ export function EmployeesSplitClient({ employees: initial, skills, roles, legalF
                 return (
                   <button
                     key={emp.id}
-                    onClick={() => setSelectedId(emp.id)}
+                    onClick={() => {
+                      if (duplicateMode) {
+                        setDuplicating(emp)
+                        setDuplicateMode(false)
+                      } else {
+                        setSelectedId(emp.id)
+                      }
+                    }}
                     className={cn(
                       'w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors border-l-2',
-                      isSelected
+                      duplicateMode
+                        ? 'border-l-transparent hover:bg-indigo-50/60 cursor-copy'
+                        : isSelected
                         ? 'bg-indigo-50 border-l-indigo-600'
                         : 'border-l-transparent hover:bg-gray-50',
                       !emp.isActive && 'opacity-50'
@@ -225,6 +289,164 @@ export function EmployeesSplitClient({ employees: initial, skills, roles, legalF
           }}
         />
       )}
+
+      {duplicating && (
+        <DuplicateEmployeeModal
+          source={duplicating}
+          onClose={() => setDuplicating(null)}
+          onCreated={(emp: any) => {
+            setDuplicating(null)
+            setSelectedId(emp.id)
+            router.refresh()
+            toast.success(`${emp.firstName} ${emp.lastName} creado a partir de ${duplicating.firstName} ${duplicating.lastName} ✓`)
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+// ── Modal duplicar empleado ────────────────────────────────────────────────────
+function DuplicateEmployeeModal({ source, onClose, onCreated }: any) {
+  const [isPending, startTransition] = useTransition()
+  const [form, setForm] = useState({ firstName: '', lastName: '', email: '', phone: '' })
+  const [errors, setErrors] = useState<Record<string, string>>({})
+  const [opts, setOpts] = useState({
+    contract: true, roles: true, restrictions: true, legal: true, vacations: true,
+  })
+
+  const sourceName = `${source.firstName} ${source.lastName}`.trim()
+  const has = {
+    contract: (source.contracts?.length ?? 0) > 0,
+    roles: (source.skills?.length ?? 0) > 0,
+    restrictions: (source.availabilities?.filter((a: any) => a.isRecurring).length ?? 0) > 0,
+    legal: true,
+    vacations: true,
+  }
+  const COPY_ITEMS: Array<{ key: keyof typeof opts; label: string; desc: string; available: boolean }> = [
+    { key: 'contract', label: 'Contrato', desc: 'Horas, tipo, convenio y límites', available: has.contract },
+    { key: 'roles', label: 'Roles y etiquetas', desc: 'Roles laborales y skills', available: has.roles },
+    { key: 'restrictions', label: 'Restricciones recurrentes', desc: 'Disponibilidad por día de la semana', available: has.restrictions },
+    { key: 'legal', label: 'Marco legal', desc: 'Convenio legal y validación', available: has.legal },
+    { key: 'vacations', label: 'Vacaciones', desc: 'Tipo y días por año', available: has.vacations },
+  ]
+
+  function validate() {
+    const e: Record<string, string> = {}
+    if (!form.firstName.trim()) e.firstName = 'Nombre obligatorio'
+    if (!form.lastName.trim()) e.lastName = 'Apellido obligatorio'
+    if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) e.email = 'Email inválido'
+    setErrors(e)
+    return Object.keys(e).length === 0
+  }
+
+  function handleSave() {
+    if (!validate()) return
+    startTransition(async () => {
+      try {
+        const emp = await duplicateEmployee({
+          sourceId: source.id,
+          firstName: form.firstName,
+          lastName: form.lastName,
+          email: form.email || undefined,
+          phone: form.phone || undefined,
+          options: opts,
+        })
+        onCreated(emp)
+      } catch (e: any) {
+        toast.error(e.message)
+      }
+    })
+  }
+
+  const inputCls = 'w-full px-3 py-2 rounded-xl border border-gray-200 text-[13px] bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-300'
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-[3px]" />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-[480px] max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="px-6 py-5 border-b border-gray-100" style={{ background: 'linear-gradient(135deg,#eef2ff,#f5f3ff)' }}>
+          <div className="flex items-center justify-between">
+            <h2 className="text-[16px] font-bold text-gray-900">Copiar empleado</h2>
+            <button onClick={onClose} className="w-8 h-8 rounded-xl flex items-center justify-center text-gray-400 hover:bg-white transition-colors">
+              <X size={16} />
+            </button>
+          </div>
+          <p className="text-[12px] text-gray-500 mt-1">
+            Copiando la configuración de <span className="font-semibold text-gray-700">{sourceName}</span>. Solo cambia los datos personales.
+          </p>
+        </div>
+
+        <div className="px-6 py-5 space-y-4 overflow-y-auto">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Nombre *</label>
+              <input className={inputCls} placeholder="Ej: Sara" autoFocus
+                value={form.firstName} onChange={e => setForm(f => ({ ...f, firstName: e.target.value }))} />
+              {errors.firstName && <span className="text-[11px] text-red-500">{errors.firstName}</span>}
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Apellidos *</label>
+              <input className={inputCls} placeholder="Ej: López"
+                value={form.lastName} onChange={e => setForm(f => ({ ...f, lastName: e.target.value }))} />
+              {errors.lastName && <span className="text-[11px] text-red-500">{errors.lastName}</span>}
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Email</label>
+              <input className={inputCls} placeholder="opcional"
+                value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
+              {errors.email && <span className="text-[11px] text-red-500">{errors.email}</span>}
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Teléfono</label>
+              <input className={inputCls} placeholder="opcional"
+                value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} />
+            </div>
+          </div>
+
+          <div>
+            <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Qué copiar</div>
+            <div className="space-y-1.5">
+              {COPY_ITEMS.map(item => (
+                <label key={item.key}
+                  className={cn(
+                    'flex items-start gap-3 p-2.5 rounded-xl border transition-all',
+                    !item.available ? 'border-gray-100 bg-gray-50/50 opacity-50 cursor-not-allowed'
+                      : opts[item.key] ? 'border-indigo-200 bg-indigo-50/40 cursor-pointer' : 'border-gray-200 cursor-pointer hover:border-gray-300'
+                  )}>
+                  <input type="checkbox" className="mt-0.5 accent-indigo-600 w-4 h-4"
+                    disabled={!item.available}
+                    checked={item.available && opts[item.key]}
+                    onChange={e => setOpts(o => ({ ...o, [item.key]: e.target.checked }))} />
+                  <div className="min-w-0">
+                    <div className="text-[13px] font-semibold text-gray-700">
+                      {item.label}
+                      {!item.available && <span className="ml-1.5 text-[10px] font-normal text-gray-400">(el origen no tiene)</span>}
+                    </div>
+                    <div className="text-[11px] text-gray-400">{item.desc}</div>
+                  </div>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex items-start gap-2 p-2.5 rounded-xl bg-amber-50 border border-amber-100">
+            <Info size={13} className="text-amber-500 mt-0.5 flex-shrink-0" />
+            <span className="text-[11px] text-amber-700">No se copian el PIN de acceso, los turnos, las ausencias ni los fichajes.</span>
+          </div>
+        </div>
+
+        <div className="flex justify-between px-6 py-4 border-t border-gray-100 bg-gray-50/50">
+          <button onClick={onClose} className="px-4 py-2 rounded-xl text-[13px] text-gray-500 hover:bg-gray-100 transition-colors">Cancelar</button>
+          <button disabled={isPending} onClick={handleSave}
+            className="flex items-center gap-2 px-5 py-2 rounded-xl bg-indigo-600 text-white text-[13px] font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+            {isPending ? <Loader2 size={14} className="animate-spin" /> : <Copy size={14} />}
+            Crear copia
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
