@@ -10,6 +10,7 @@ import {
   ChevronDown, Lock, Sun, Moon, Repeat
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { employeeColor, primaryRoleOf } from '@/lib/employee-color'
 import {
   upsertEmployee, upsertContract, setEmployeeSkills,
   upsertAvailability, deleteAvailability, toggleEmployeeActive
@@ -97,7 +98,7 @@ export function EmployeeDetailClient({ employee: emp, skills: allSkills, roles: 
           {/* Avatar */}
           <div
             className="w-16 h-16 rounded-2xl flex items-center justify-center text-white text-[20px] font-bold shadow-md flex-shrink-0"
-            style={{ backgroundColor: emp.color || '#4f46e5' }}
+            style={{ backgroundColor: employeeColor(emp, allRoles) }}
           >
             {initials}
           </div>
@@ -190,9 +191,15 @@ export function EmployeeDetailClient({ employee: emp, skills: allSkills, roles: 
 
             <SectionCard title="Color en el cuadrante">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl shadow-md" style={{ backgroundColor: emp.color }} />
-                <span className="text-[13px] text-gray-600 font-mono">{emp.color}</span>
-                <span className="text-[12px] text-gray-400">— Identifica a este empleado en el planificador</span>
+                <div className="w-10 h-10 rounded-xl shadow-md" style={{ backgroundColor: employeeColor(emp, allRoles) }} />
+                <div className="flex flex-col">
+                  <span className="text-[13px] text-gray-700 font-medium">
+                    {primaryRoleOf(emp)?.name ?? 'Sin rol asignado'}
+                  </span>
+                  <span className="text-[12px] text-gray-400">
+                    El color se hereda del rol del empleado
+                  </span>
+                </div>
               </div>
             </SectionCard>
           </div>
@@ -956,27 +963,21 @@ function EditInfoModal({ emp, onClose, onSaved }: any) {
     lastName: emp.lastName || '',
     email: emp.email || '',
     phone: emp.phone || '',
-    color: emp.color || '#4f46e5',
     hireDate: emp.hireDate ? new Date(emp.hireDate).toISOString().split('T')[0] : '',
     notes: emp.notes || '',
   })
-  const EMP_COLORS = ['#4f46e5','#059669','#9333ea','#ea580c','#dc2626','#0284c7','#ca8a04','#16a34a','#db2777','#0891b2','#7c3aed','#64748b']
 
   return (
     <Modal title="Editar información personal" onClose={onClose}>
       <div className="space-y-4">
-        {/* Color picker */}
+        {/* Avatar (el color se hereda del rol, no es editable aquí) */}
         <div className="flex items-center gap-4 p-3 bg-gray-50 rounded-xl">
           <div className="w-12 h-12 rounded-xl shadow-md text-white font-bold flex items-center justify-center text-[15px]"
-            style={{ backgroundColor: form.color }}>
+            style={{ backgroundColor: employeeColor(emp) }}>
             {form.firstName?.[0]}{form.lastName?.[0]}
           </div>
-          <div className="flex gap-1.5 flex-wrap">
-            {EMP_COLORS.map(c => (
-              <button key={c} onClick={() => setForm((f: any) => ({ ...f, color: c }))}
-                className={cn('w-7 h-7 rounded-lg transition-all', form.color === c && 'ring-2 ring-offset-1 ring-gray-800 scale-110')}
-                style={{ backgroundColor: c }} />
-            ))}
+          <div className="text-[12px] text-gray-500">
+            El color se asigna automáticamente según el rol del empleado
           </div>
         </div>
 

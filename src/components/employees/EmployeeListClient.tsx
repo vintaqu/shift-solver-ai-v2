@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { upsertEmployee, toggleEmployeeActive } from '@/server/actions/employees'
+import { employeeColor } from '@/lib/employee-color'
 
 const ROLE_LABELS: Record<string, string> = {
   BASIC: 'Camarero básico',
@@ -32,12 +33,6 @@ const CONTRACT_LABELS: Record<string, string> = {
   EXTRA: 'Extra',
   TEMPORAL: 'Temporal',
 }
-
-const EMP_COLORS = [
-  '#4f46e5','#059669','#9333ea','#ea580c',
-  '#dc2626','#0284c7','#ca8a04','#16a34a',
-  '#db2777','#0891b2','#7c3aed','#64748b',
-]
 
 interface Props {
   employees: any[]
@@ -173,7 +168,7 @@ export function EmployeeListClient({ employees: initial, skills, roles, organiza
                   {/* Avatar */}
                   <div
                     className="w-12 h-12 rounded-2xl flex items-center justify-center text-white font-bold text-[14px] flex-shrink-0 shadow-sm"
-                    style={{ backgroundColor: emp.color || '#4f46e5' }}
+                    style={{ backgroundColor: employeeColor(emp, roles) }}
                   >
                     {initials}
                   </div>
@@ -251,7 +246,6 @@ export function EmployeeListClient({ employees: initial, skills, roles, organiza
         <CreateEmployeeModal
           organizationId={organizationId}
           locationId={locationId}
-          usedColors={initial.map((e: any) => e.color)}
           onClose={() => setShowCreate(false)}
           onCreated={(id) => {
             setShowCreate(false)
@@ -264,14 +258,13 @@ export function EmployeeListClient({ employees: initial, skills, roles, organiza
 }
 
 // ─── Modal crear empleado ──────────────────────────────────────────────────────
-function CreateEmployeeModal({ organizationId, locationId, usedColors, onClose, onCreated }: any) {
+function CreateEmployeeModal({ organizationId, locationId, onClose, onCreated }: any) {
   const [isPending, startTransition] = useTransition()
   const [form, setForm] = useState({
     firstName: '',
     lastName: '',
     email: '',
     phone: '',
-    color: EMP_COLORS.find(c => !usedColors.includes(c)) || EMP_COLORS[0],
     hireDate: new Date().toISOString().split('T')[0],
   })
   const [errors, setErrors] = useState<Record<string, string>>({})
@@ -314,26 +307,17 @@ function CreateEmployeeModal({ organizationId, locationId, usedColors, onClose, 
         </div>
 
         <div className="px-6 py-5 space-y-4">
-          {/* Preview avatar */}
+          {/* Preview avatar — el color se asignará automáticamente según el rol */}
           <div className="flex items-center gap-4">
             <div
               className="w-14 h-14 rounded-2xl flex items-center justify-center text-white text-[18px] font-bold shadow-md"
-              style={{ backgroundColor: form.color }}
+              style={{ backgroundColor: '#9ca3af' }}
             >
               {form.firstName?.[0] || '?'}{form.lastName?.[0] || ''}
             </div>
             <div>
-              <div className="text-[12px] font-semibold text-gray-500 mb-1.5">Color en el cuadrante</div>
-              <div className="flex gap-1.5 flex-wrap">
-                {EMP_COLORS.map(c => (
-                  <button
-                    key={c}
-                    onClick={() => setForm(f => ({ ...f, color: c }))}
-                    className={cn('w-6 h-6 rounded-lg transition-all', form.color === c ? 'ring-2 ring-offset-1 ring-gray-800 scale-110' : 'hover:scale-105')}
-                    style={{ backgroundColor: c }}
-                  />
-                ))}
-              </div>
+              <div className="text-[12px] font-semibold text-gray-700">Nuevo empleado</div>
+              <div className="text-[11px] text-gray-400">El color se asigna según el rol que le asignes después</div>
             </div>
           </div>
 

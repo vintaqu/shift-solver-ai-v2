@@ -17,19 +17,11 @@ import { createAssignment, updateAssignment, moveAssignment, deleteAssignment, t
 import { updateEmployeeOrder } from '@/server/actions/employees'
 import { upsertDateSlot, deleteDateSlot } from '@/server/actions/coverageWeekly'
 import { RoleRequirementsEditor, initialRoleRows, type RoleRow } from '@/components/coverage/RoleRequirementsEditor'
+import { employeeColorShades } from '@/lib/employee-color'
 import { GenerateModal } from './GenerateModal'
 
 // ─── Paleta de colores por empleado ───────────────────────────────────────────
-const EMP_COLORS = [
-  { bg: '#eef2ff', border: '#818cf8', text: '#3730a3', dot: '#4f46e5' },
-  { bg: '#ecfdf5', border: '#34d399', text: '#065f46', dot: '#059669' },
-  { bg: '#fdf4ff', border: '#c084fc', text: '#6b21a8', dot: '#9333ea' },
-  { bg: '#fff7ed', border: '#fb923c', text: '#9a3412', dot: '#ea580c' },
-  { bg: '#fef2f2', border: '#f87171', text: '#991b1b', dot: '#dc2626' },
-  { bg: '#f0f9ff', border: '#38bdf8', text: '#0c4a6e', dot: '#0284c7' },
-  { bg: '#fefce8', border: '#facc15', text: '#713f12', dot: '#ca8a04' },
-  { bg: '#f0fdf4', border: '#4ade80', text: '#14532d', dot: '#16a34a' },
-]
+// Los colores de empleado se derivan ahora de su ROL (ver @/lib/employee-color).
 
 // ─── Colores de estado del planning ───────────────────────────────────────────
 const STATUS_COLORS: Record<string, { label: string; cls: string }> = {
@@ -181,7 +173,7 @@ export function PlannerClientPage({ period, employees: allEmployees, weekDays, a
 
   // Asignar color fijo por empleado
   const empColorMap = Object.fromEntries(
-    allEmployees.map((e: any, i: number) => [e.id, EMP_COLORS[i % EMP_COLORS.length]])
+    allEmployees.map((e: any) => [e.id, employeeColorShades(e, laborRoles)])
   )
 
   // Agrupar assignments por empleado y día

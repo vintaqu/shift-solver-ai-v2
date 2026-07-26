@@ -10,6 +10,7 @@ import {
 import { cn } from '@/lib/utils'
 import { EmployeeDetailClient } from './EmployeeDetailClient'
 import { upsertEmployee } from '@/server/actions/employees'
+import { employeeColor } from '@/lib/employee-color'
 
 const ROLE_COLORS: Record<string, string> = {
   OWNER:        'bg-gray-800 text-white',
@@ -137,7 +138,7 @@ export function EmployeesSplitClient({ employees: initial, skills, roles, legalF
                     {/* Avatar */}
                     <div
                       className="w-8 h-8 rounded-full flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0"
-                      style={{ backgroundColor: emp.color || '#6366f1' }}
+                      style={{ backgroundColor: employeeColor(emp, roles) }}
                     >
                       {initials}
                     </div>
@@ -233,11 +234,9 @@ function CreateEmployeeModal({ organizationId, onClose, onCreated }: any) {
   const [isPending, startTransition] = useTransition()
   const [form, setForm] = useState({
     firstName: '', lastName: '', email: '', phone: '',
-    color: '#6366f1',
   })
   const [errors, setErrors] = useState<Record<string, string>>({})
 
-  const COLORS = ['#6366f1','#10b981','#f59e0b','#ef4444','#8b5cf6','#0891b2','#ec4899','#f97316','#84cc16','#14b8a6']
 
   function validate() {
     const e: Record<string, string> = {}
@@ -293,17 +292,6 @@ function CreateEmployeeModal({ organizationId, onClose, onCreated }: any) {
             ))}
           </div>
 
-          {/* Color */}
-          <div>
-            <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Color en el cuadrante</label>
-            <div className="flex items-center gap-2 flex-wrap">
-              {COLORS.map(c => (
-                <button key={c} onClick={() => setForm(f => ({ ...f, color: c }))}
-                  className={cn('w-6 h-6 rounded-full transition-all', form.color === c ? 'ring-2 ring-offset-1 ring-gray-500 scale-110' : 'hover:scale-110')}
-                  style={{ backgroundColor: c }} />
-              ))}
-            </div>
-          </div>
         </div>
 
         <div className="flex justify-between px-6 py-4 border-t border-gray-100 bg-gray-50/50">
@@ -321,7 +309,6 @@ function CreateEmployeeModal({ organizationId, onClose, onCreated }: any) {
                     lastName: form.lastName.trim(),
                     email: form.email.trim() || undefined,
                     phone: form.phone.trim() || undefined,
-                    color: form.color,
                   })
                   onCreated(emp)
                 } catch (err: any) { toast.error(err.message) }

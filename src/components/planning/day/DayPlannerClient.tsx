@@ -11,21 +11,13 @@ import { cn } from '@/lib/utils'
 import { upsertDateSlot, deleteDateSlot } from '@/server/actions/coverageWeekly'
 import { swapAssignments } from '@/server/actions/planning'
 import { RoleRequirementsEditor, initialRoleRows, type RoleRow } from '@/components/coverage/RoleRequirementsEditor'
+import { employeeColorShades } from '@/lib/employee-color'
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 const DAYS_FULL = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
 const MONTHS_ES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
 
-const EMP_COLORS = [
-  { bg: '#eef2ff', border: '#818cf8', text: '#3730a3', dot: '#4f46e5' },
-  { bg: '#ecfdf5', border: '#34d399', text: '#065f46', dot: '#059669' },
-  { bg: '#fdf4ff', border: '#c084fc', text: '#6b21a8', dot: '#9333ea' },
-  { bg: '#fff7ed', border: '#fb923c', text: '#9a3412', dot: '#ea580c' },
-  { bg: '#fef2f2', border: '#f87171', text: '#991b1b', dot: '#dc2626' },
-  { bg: '#f0f9ff', border: '#38bdf8', text: '#0c4a6e', dot: '#0284c7' },
-  { bg: '#fefce8', border: '#facc15', text: '#713f12', dot: '#ca8a04' },
-  { bg: '#f0fdf4', border: '#4ade80', text: '#14532d', dot: '#16a34a' },
-]
+// Los colores de empleado se derivan de su ROL (ver @/lib/employee-color).
 
 function timeToMin(t: string): number {
   const [h, m] = t.split(':').map(Number)
@@ -110,8 +102,8 @@ export function DayPlannerClient({
   }, [allCoverageSlots, roleFilter])
 
   const empColorMap = useMemo(() => Object.fromEntries(
-    allEmployees.map((e: any, i: number) => [e.id, EMP_COLORS[i % EMP_COLORS.length]])
-  ), [allEmployees])
+    allEmployees.map((e: any) => [e.id, employeeColorShades(e, laborRoles)])
+  ), [allEmployees, laborRoles])
 
   // ── Rango horario del día: min/max entre cobertura y turnos; fallback 08–24 ──
   const range = useMemo(() => {
