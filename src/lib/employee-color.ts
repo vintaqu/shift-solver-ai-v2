@@ -22,6 +22,7 @@ const LEVEL_ORDER: Record<string, number> = {
 
 interface LaborRoleLike {
   id?: string
+  name?: string | null
   color?: string | null
   level?: string | null
   priority?: number | null

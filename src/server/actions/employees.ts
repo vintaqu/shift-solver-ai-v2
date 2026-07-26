@@ -13,7 +13,7 @@ export async function upsertEmployee(data: {
   lastName: string
   email?: string
   phone?: string
-  color: string
+  color?: string
   hireDate?: string
   notes?: string
   isActive?: boolean
@@ -25,7 +25,9 @@ export async function upsertEmployee(data: {
     lastName: data.lastName.trim(),
     email: data.email?.trim() || null,
     phone: data.phone?.trim() || null,
-    color: data.color,
+    // El color ya no se gestiona por empleado (se deriva del rol). Solo se
+    // persiste si viene explícitamente; si no, la columna usa su @default.
+    ...(data.color ? { color: data.color } : {}),
     hireDate: data.hireDate ? new Date(data.hireDate) : null,
     notes: data.notes?.trim() || null,
     isActive: data.isActive ?? true,

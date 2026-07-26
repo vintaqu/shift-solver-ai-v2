@@ -410,7 +410,7 @@ export async function bulkUpsertSlots(data: {
     },
   })
 
-  const existingMap = new Map(existing.map(s => [`${s.dayOfWeek}|${s.startTime}`, s]))
+  const existingMap = new Map<string, any>(existing.map((s: any) => [`${s.dayOfWeek}|${s.startTime}`, s]))
 
   const toCreate: any[] = []
   const toUpdate: string[] = []

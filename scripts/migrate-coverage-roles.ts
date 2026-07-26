@@ -79,7 +79,7 @@ async function main() {
     })
 
     const baseRole = roles[0]
-    const levelById = new Map(roles.map(r => [r.id, r.level as unknown as string]))
+    const levelById = new Map<string, string>(roles.map(r => [r.id, r.level as unknown as string]))
 
     const slots = await prisma.coverageRequirement.findMany({
       where: { organizationId: org.id },

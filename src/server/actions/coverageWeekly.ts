@@ -405,8 +405,8 @@ export async function bulkUpsertDateSlots(data: {
       startTime: { in: franjas.map(f => f.start) },
     },
   })
-  const existingMap = new Map(
-    existing.map(s => [`${(s.date as Date).toISOString().slice(0, 10)}|${s.startTime}`, s])
+  const existingMap = new Map<string, any>(
+    existing.map((s: any) => [`${(s.date as Date).toISOString().slice(0, 10)}|${s.startTime}`, s])
   )
 
   const toCreate: any[] = []
