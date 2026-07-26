@@ -860,7 +860,7 @@ function ImportTemplateModal({ templates, weekStartISO, locationId, organization
         <div className="px-6 py-4 border-b border-gray-100 flex-shrink-0" style={{ background: 'linear-gradient(135deg,#eef2ff,#f5f3ff)' }}>
           <h3 className="text-[15px] font-bold text-gray-900">Importar plantilla</h3>
           <p className="text-[11px] text-gray-500 mt-0.5">
-            Se aplicará a la semana {isoWeekNumber(weekStartISO)} ({weekRangeLabel(weekStartISO)}). La cobertura actual se reemplazará.
+            Se aplicará a la semana {isoWeekNumber(weekStartISO)} ({weekRangeLabel(weekStartISO)}). La cobertura actual se reemplazará y esta plantilla pasará a ser la activa.
           </p>
         </div>
         <div className="px-6 py-4 space-y-2 overflow-y-auto flex-1">

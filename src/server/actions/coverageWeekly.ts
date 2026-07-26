@@ -629,6 +629,17 @@ export async function importTemplateToWeek(
   })
   await cloneRoleRequirements(templateSlots as any, tplKey, created, tplKey)
 
+  // Al importar, esta plantilla pasa a ser la ACTIVA del local: se desactivan
+  // todas las demás y se marca ésta como activa (activación manual, indefinida).
+  await prisma.coverageTemplate.updateMany({
+    where: { locationId, id: { not: templateId } },
+    data: { isActive: false, activationType: null, activeUntil: null },
+  })
+  await prisma.coverageTemplate.update({
+    where: { id: templateId },
+    data: { isActive: true, activationType: 'MANUAL', activeUntil: null },
+  })
+
   revalidatePath('/coverage')
   return { count: templateSlots.length, templateName: template.name }
 }
