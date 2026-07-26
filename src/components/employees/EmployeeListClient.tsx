@@ -4,12 +4,12 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
-  Plus, Search, Users, ChevronRight, MoreVertical,
+  Plus, Search, Users, ChevronRight, MoreVertical, Copy,
   UserCheck, UserX, Clock, Briefcase, X, Loader2,
-  AlertCircle, CheckCircle
+  AlertCircle, CheckCircle, Info
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { upsertEmployee, toggleEmployeeActive } from '@/server/actions/employees'
+import { upsertEmployee, toggleEmployeeActive, duplicateEmployee } from '@/server/actions/employees'
 import { employeeColor } from '@/lib/employee-color'
 
 const ROLE_LABELS: Record<string, string> = {
@@ -49,6 +49,7 @@ export function EmployeeListClient({ employees: initial, skills, roles, organiza
   const [filterRole, setFilterRole] = useState<string>('all')
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'inactive'>('active')
   const [showCreate, setShowCreate] = useState(false)
+  const [duplicating, setDuplicating] = useState<any | null>(null)
 
   // Filter
   const filtered = initial.filter(e => {
@@ -232,6 +233,13 @@ export function EmployeeListClient({ employees: initial, skills, roles, organiza
                       <div className="text-[16px] font-bold text-gray-800">{emp._count?.absences || 0}</div>
                       <div className="text-[10px] text-gray-400">ausencias</div>
                     </div>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setDuplicating(emp) }}
+                      title="Duplicar empleado"
+                      className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-300 opacity-0 group-hover:opacity-100 hover:bg-indigo-50 hover:text-indigo-500 transition-all"
+                    >
+                      <Copy size={15} />
+                    </button>
                     <ChevronRight size={16} className="text-gray-300 group-hover:text-indigo-400 transition-colors" />
                   </div>
                 </div>
@@ -249,6 +257,18 @@ export function EmployeeListClient({ employees: initial, skills, roles, organiza
           onClose={() => setShowCreate(false)}
           onCreated={(id) => {
             setShowCreate(false)
+            router.push(`/employees/${id}`)
+          }}
+        />
+      )}
+
+      {/* Modal duplicar empleado */}
+      {duplicating && (
+        <DuplicateEmployeeModal
+          source={duplicating}
+          onClose={() => setDuplicating(null)}
+          onCreated={(id: string) => {
+            setDuplicating(null)
             router.push(`/employees/${id}`)
           }}
         />
@@ -381,6 +401,163 @@ function CreateEmployeeModal({ organizationId, locationId, onClose, onCreated }:
           >
             {isPending ? <Loader2 size={14} className="animate-spin" /> : null}
             Crear y configurar →
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Modal duplicar empleado ───────────────────────────────────────────────────
+function DuplicateEmployeeModal({ source, onClose, onCreated }: any) {
+  const [isPending, startTransition] = useTransition()
+  const [form, setForm] = useState({ firstName: '', lastName: '', email: '', phone: '' })
+  const [errors, setErrors] = useState<Record<string, string>>({})
+  const [opts, setOpts] = useState({
+    contract: true,
+    roles: true,
+    restrictions: true,
+    legal: true,
+    vacations: true,
+  })
+
+  const sourceName = `${source.firstName} ${source.lastName}`.trim()
+
+  // Qué tiene el origen para copiar (para no ofrecer casillas vacías).
+  const has = {
+    contract: (source.contracts?.length ?? 0) > 0 || !!source.contract,
+    roles: (source.skills?.length ?? 0) > 0,
+    restrictions: (source.availabilities?.filter((a: any) => a.isRecurring).length ?? 0) > 0,
+    legal: true,
+    vacations: true,
+  }
+
+  const COPY_ITEMS: Array<{ key: keyof typeof opts; label: string; desc: string; available: boolean }> = [
+    { key: 'contract', label: 'Contrato', desc: 'Horas, tipo, convenio y límites', available: has.contract },
+    { key: 'roles', label: 'Roles y etiquetas', desc: 'Roles laborales y skills', available: has.roles },
+    { key: 'restrictions', label: 'Restricciones recurrentes', desc: 'Disponibilidad por día de la semana', available: has.restrictions },
+    { key: 'legal', label: 'Marco legal', desc: 'Convenio legal y validación', available: has.legal },
+    { key: 'vacations', label: 'Vacaciones', desc: 'Tipo y días por año', available: has.vacations },
+  ]
+
+  function validate() {
+    const e: Record<string, string> = {}
+    if (!form.firstName.trim()) e.firstName = 'Nombre obligatorio'
+    if (!form.lastName.trim()) e.lastName = 'Apellido obligatorio'
+    if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) e.email = 'Email inválido'
+    setErrors(e)
+    return Object.keys(e).length === 0
+  }
+
+  function handleSave() {
+    if (!validate()) return
+    startTransition(async () => {
+      try {
+        const emp = await duplicateEmployee({
+          sourceId: source.id,
+          firstName: form.firstName,
+          lastName: form.lastName,
+          email: form.email || undefined,
+          phone: form.phone || undefined,
+          options: opts,
+        })
+        toast.success(`${form.firstName} ${form.lastName} creado a partir de ${sourceName} ✓`)
+        onCreated(emp.id)
+      } catch (e: any) {
+        toast.error(e.message)
+      }
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-[3px]" />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-[480px] max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+
+        <div className="px-6 py-5 border-b border-gray-100" style={{ background: 'linear-gradient(135deg,#eef2ff,#f5f3ff)' }}>
+          <div className="flex items-center justify-between">
+            <h2 className="text-[16px] font-bold text-gray-900">Duplicar empleado</h2>
+            <button onClick={onClose} className="w-8 h-8 rounded-xl flex items-center justify-center text-gray-400 hover:bg-white transition-colors">
+              <X size={16} />
+            </button>
+          </div>
+          <p className="text-[12px] text-gray-500 mt-1">
+            Copiando la configuración de <span className="font-semibold text-gray-700">{sourceName}</span>. Solo cambia los datos personales.
+          </p>
+        </div>
+
+        <div className="px-6 py-5 space-y-4 overflow-y-auto">
+          {/* Datos personales del nuevo empleado */}
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Nombre *" error={errors.firstName}>
+              <input className={inputCls(!!errors.firstName)} placeholder="Ej: Sara"
+                value={form.firstName} onChange={e => setForm(f => ({ ...f, firstName: e.target.value }))} autoFocus />
+            </Field>
+            <Field label="Apellidos *" error={errors.lastName}>
+              <input className={inputCls(!!errors.lastName)} placeholder="Ej: López"
+                value={form.lastName} onChange={e => setForm(f => ({ ...f, lastName: e.target.value }))} />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Email" error={errors.email}>
+              <input className={inputCls(!!errors.email)} placeholder="opcional"
+                value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
+            </Field>
+            <Field label="Teléfono">
+              <input className={inputCls(false)} placeholder="opcional"
+                value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} />
+            </Field>
+          </div>
+
+          {/* Qué copiar */}
+          <div>
+            <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Qué copiar</div>
+            <div className="space-y-1.5">
+              {COPY_ITEMS.map(item => (
+                <label
+                  key={item.key}
+                  className={cn(
+                    'flex items-start gap-3 p-2.5 rounded-xl border transition-all',
+                    !item.available ? 'border-gray-100 bg-gray-50/50 opacity-50 cursor-not-allowed'
+                      : opts[item.key] ? 'border-indigo-200 bg-indigo-50/40 cursor-pointer' : 'border-gray-200 cursor-pointer hover:border-gray-300'
+                  )}
+                >
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 accent-indigo-600 w-4 h-4"
+                    disabled={!item.available}
+                    checked={item.available && opts[item.key]}
+                    onChange={e => setOpts(o => ({ ...o, [item.key]: e.target.checked }))}
+                  />
+                  <div className="min-w-0">
+                    <div className="text-[13px] font-semibold text-gray-700">
+                      {item.label}
+                      {!item.available && <span className="ml-1.5 text-[10px] font-normal text-gray-400">(el origen no tiene)</span>}
+                    </div>
+                    <div className="text-[11px] text-gray-400">{item.desc}</div>
+                  </div>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex items-start gap-2 p-2.5 rounded-xl bg-amber-50 border border-amber-100">
+            <Info size={13} className="text-amber-500 mt-0.5 flex-shrink-0" />
+            <span className="text-[11px] text-amber-700">
+              No se copian el PIN de acceso, los turnos, las ausencias ni los fichajes.
+            </span>
+          </div>
+        </div>
+
+        <div className="flex justify-between px-6 py-4 border-t border-gray-100 bg-gray-50/50">
+          <button onClick={onClose} className="px-4 py-2 rounded-xl text-[13px] text-gray-500 hover:bg-gray-100 transition-colors">Cancelar</button>
+          <button
+            disabled={isPending}
+            onClick={handleSave}
+            className="flex items-center gap-2 px-5 py-2 rounded-xl bg-indigo-600 text-white text-[13px] font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+          >
+            {isPending ? <Loader2 size={14} className="animate-spin" /> : <Copy size={14} />}
+            Crear copia
           </button>
         </div>
       </div>

@@ -240,3 +240,122 @@ export async function updateEmployeeOrder(orderedIds: string[]) {
   revalidatePath('/planning')
   return { success: true }
 }
+
+// ── Duplicar empleado ──────────────────────────────────────────────────────
+// Clona un empleado existente para agilizar el alta cuando hay rotación: se
+// copia la configuración (contrato, roles/skills, restricciones recurrentes,
+// marco legal y vacaciones) según las casillas marcadas. NUNCA se copian:
+// PIN, cuenta de usuario, asignaciones, ausencias ni fichajes.
+export async function duplicateEmployee(data: {
+  sourceId: string
+  firstName: string
+  lastName: string
+  email?: string
+  phone?: string
+  options?: {
+    contract?: boolean       // contrato activo
+    roles?: boolean          // roles y skills
+    restrictions?: boolean   // disponibilidad recurrente
+    legal?: boolean          // marco legal + skipLegalValidation
+    vacations?: boolean      // tipo y días de vacaciones
+  }
+}) {
+  const opts = {
+    contract: true,
+    roles: true,
+    restrictions: true,
+    legal: true,
+    vacations: true,
+    ...(data.options ?? {}),
+  }
+
+  const source = await prisma.employee.findUnique({
+    where: { id: data.sourceId },
+    include: {
+      contracts: { where: { isActive: true } },
+      skills: true,
+      availabilities: { where: { isRecurring: true } },
+    },
+  })
+  if (!source) throw new Error('Empleado de origen no encontrado')
+
+  // 1) Crear el nuevo empleado con los datos básicos nuevos + config heredada.
+  const nuevo = await prisma.employee.create({
+    data: {
+      organizationId: source.organizationId,
+      locationId: source.locationId,
+      firstName: data.firstName.trim(),
+      lastName: data.lastName.trim(),
+      email: data.email?.trim() || null,
+      phone: data.phone?.trim() || null,
+      isActive: true,
+      hireDate: new Date(),
+      // Config legal (opcional)
+      legalFrameworkId: opts.legal ? source.legalFrameworkId : null,
+      skipLegalValidation: opts.legal ? source.skipLegalValidation : false,
+      // Vacaciones (opcional)
+      vacationDaysType: opts.vacations ? source.vacationDaysType : undefined,
+      vacationDaysPerYear: opts.vacations ? source.vacationDaysPerYear : undefined,
+      displayOrder: source.displayOrder,
+      // NUNCA copiar: pin, userId (cuenta), notes personales.
+    },
+  })
+
+  // 2) Contrato activo (opcional) — se copia tal cual, cambiando el owner.
+  if (opts.contract && source.contracts.length > 0) {
+    const c = source.contracts[0]
+    await prisma.employeeContract.create({
+      data: {
+        employeeId: nuevo.id,
+        contractType: c.contractType,
+        weeklyHours: c.weeklyHours,
+        minWeeklyHours: c.minWeeklyHours,
+        maxWeeklyHours: c.maxWeeklyHours,
+        maxDailyHours: c.maxDailyHours,
+        maxConsecutiveDays: c.maxConsecutiveDays,
+        minRestBetweenShifts: c.minRestBetweenShifts,
+        annualMaxHours: c.annualMaxHours,
+        hourlyWage: c.hourlyWage,
+        hourlyCost: c.hourlyCost,
+        collectiveAgreement: c.collectiveAgreement,
+        startDate: new Date(),        // el contrato del nuevo arranca hoy
+        endDate: null,
+        isActive: true,
+        notes: c.notes,               // preserva preferContinuous/allowSplit
+      },
+    })
+  }
+
+  // 3) Roles y skills (opcional) — bulk.
+  if (opts.roles && source.skills.length > 0) {
+    await prisma.employeeSkill.createMany({
+      data: source.skills.map(s => ({
+        employeeId: nuevo.id,
+        laborRoleId: s.laborRoleId,
+        skillId: s.skillId,
+        level: s.level,
+      })),
+    })
+  }
+
+  // 4) Restricciones recurrentes (opcional) — solo las recurrentes; las
+  //    puntuales por fecha no tienen sentido para otra persona.
+  if (opts.restrictions && source.availabilities.length > 0) {
+    await prisma.availability.createMany({
+      data: source.availabilities.map(a => ({
+        employeeId: nuevo.id,
+        date: null,
+        dayOfWeek: a.dayOfWeek,
+        startTime: a.startTime,
+        endTime: a.endTime,
+        type: a.type,
+        isRecurring: true,
+        notes: a.notes,
+      })),
+    })
+  }
+
+  revalidatePath('/employees')
+  revalidatePath(`/employees/${nuevo.id}`)
+  return nuevo
+}
