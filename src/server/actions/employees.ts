@@ -139,7 +139,11 @@ export async function setEmployeeSkills(employeeId: string, skillIds: string[], 
     })
   }
 
+  // El rol afecta al color y a los badges en la lista lateral y en el
+  // planificador, no solo en la ficha: revalidamos las tres rutas.
+  revalidatePath('/employees')
   revalidatePath(`/employees/${employeeId}`)
+  revalidatePath('/planning')
   return { success: true }
 }
 

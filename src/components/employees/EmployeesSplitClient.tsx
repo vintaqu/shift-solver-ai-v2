@@ -31,6 +31,13 @@ export function EmployeesSplitClient({ employees: initial, skills, roles, legalF
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [employees, setEmployees] = useState(initial)
+
+  // router.refresh() (tras cambiar rol, contrato, etc. en la ficha) trae datos
+  // nuevos por props. Como `employees` es estado local, hay que resincronizarlo
+  // para que la lista lateral refleje el cambio sin necesidad de F5.
+  useEffect(() => {
+    setEmployees(initial)
+  }, [initial])
   const [selectedId, setSelectedId] = useState<string | null>(initial[0]?.id ?? null)
   const [search, setSearch] = useState('')
   const [filterRole, setFilterRole] = useState('all')

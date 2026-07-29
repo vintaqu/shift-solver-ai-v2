@@ -8,12 +8,12 @@ import { toast } from 'sonner'
 import {
   ChevronLeft, ChevronRight, Sparkles, Send, Plus,
   Lock, Unlock, Trash2, AlertTriangle, AlertCircle,
-  CheckCircle, Info, Clock, User, BarChart2, X,
+  CheckCircle, Info, Clock, User, BarChart2, X, ArrowLeftRight,
   Copy, RotateCcw, Download, Eye, Loader2, FileSpreadsheet,
   Users, ChevronDown, ChevronUp,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { createAssignment, updateAssignment, moveAssignment, deleteAssignment, toggleAssignmentLock, publishPlanningPeriod } from '@/server/actions/planning'
+import { createAssignment, updateAssignment, moveAssignment, deleteAssignment, toggleAssignmentLock, publishPlanningPeriod, swapAssignments } from '@/server/actions/planning'
 import { updateEmployeeOrder } from '@/server/actions/employees'
 import { upsertDateSlot, deleteDateSlot } from '@/server/actions/coverageWeekly'
 import { RoleRequirementsEditor, initialRoleRows, type RoleRow } from '@/components/coverage/RoleRequirementsEditor'
@@ -106,6 +106,7 @@ export function PlannerClientPage({ period, employees: allEmployees, weekDays, a
   const [isPending, startTransition] = useTransition()
   const [editor, setEditor] = useState<EditorState>({ open: false, mode: 'create' })
   const [showSummary, setShowSummary] = useState(false)
+  const [showSwap, setShowSwap] = useState(false)
   const [showCoverage, setShowCoverage] = useState(true)
   const [coverageExpanded, setCoverageExpanded] = useState(false)
   const [quickEditSlot, setQuickEditSlot] = useState<{ date: string; time: string; slot: any | null } | null>(null)
@@ -385,6 +386,14 @@ export function PlannerClientPage({ period, employees: allEmployees, weekDays, a
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-600 text-[12px] font-medium hover:bg-gray-50 transition-colors"
           >
             <BarChart2 size={13} /> Resumen
+          </button>
+          <button
+            onClick={() => setShowSwap(true)}
+            disabled={period.status === 'PUBLISHED'}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-600 text-[12px] font-medium hover:bg-gray-50 disabled:opacity-50 transition-colors"
+            title={period.status === 'PUBLISHED' ? 'No se puede intercambiar en una semana publicada' : 'Intercambiar turnos entre dos empleados'}
+          >
+            <ArrowLeftRight size={13} /> Intercambiar
           </button>
           <button
             onClick={() => setShowGenerate(true)}
@@ -976,6 +985,191 @@ export function PlannerClientPage({ period, employees: allEmployees, weekDays, a
           onClose={() => setShowSummary(false)}
         />
       )}
+
+      {showSwap && (
+        <WeekSwapModal
+          periodId={period.id}
+          employees={employees}
+          weekDays={weekDays}
+          assignmentsByEmpDay={assignmentsByEmpDay}
+          onClose={() => setShowSwap(false)}
+          onSwapped={() => { setShowSwap(false); router.refresh() }}
+        />
+      )}
+    </div>
+  )
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// WEEK SWAP MODAL — intercambiar turnos de días concretos entre dos empleados
+// ═════════════════════════════════════════════════════════════════════════════
+const DAY_LABELS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
+
+function WeekSwapModal({ periodId, employees, weekDays, assignmentsByEmpDay, onClose, onSwapped }: any) {
+  const [isPending, startTransition] = useTransition()
+  const [empA, setEmpA] = useState<string>('')
+  const [empB, setEmpB] = useState<string>('')
+  const [selectedDays, setSelectedDays] = useState<number[]>([]) // índices 0..6
+
+  const toggleDay = (i: number) =>
+    setSelectedDays(prev => prev.includes(i) ? prev.filter(d => d !== i) : [...prev, i].sort((a, b) => a - b))
+
+  const allSelected = selectedDays.length === weekDays.length
+  const toggleAll = () =>
+    setSelectedDays(allSelected ? [] : weekDays.map((_: string, i: number) => i))
+
+  // Nº de turnos de un empleado en un día concreto.
+  const countFor = (empId: string, dayIdx: number): number =>
+    empId ? (assignmentsByEmpDay[empId]?.[dayIdx]?.length ?? 0) : 0
+
+  const totalA = empA ? selectedDays.reduce((acc, d) => acc + countFor(empA, d), 0) : 0
+  const totalB = empB ? selectedDays.reduce((acc, d) => acc + countFor(empB, d), 0) : 0
+
+  const roleA = empA ? employees.find((e: any) => e.id === empA)?.skills?.[0]?.laborRole?.name : null
+  const roleB = empB ? employees.find((e: any) => e.id === empB)?.skills?.[0]?.laborRole?.name : null
+  const differentRoles = roleA && roleB && roleA !== roleB
+
+  const canSwap = empA && empB && empA !== empB && selectedDays.length > 0 && (totalA > 0 || totalB > 0)
+
+  function dateISOForDay(dayIdx: number): string {
+    return new Date(weekDays[dayIdx]).toISOString().slice(0, 10)
+  }
+
+  function handleSwap() {
+    if (!canSwap) return
+    startTransition(async () => {
+      try {
+        // Un intercambio por cada día seleccionado (permite días sueltos).
+        let moved = 0
+        for (const dayIdx of selectedDays) {
+          const iso = dateISOForDay(dayIdx)
+          const r = await swapAssignments({
+            planningPeriodId: periodId,
+            employeeAId: empA,
+            employeeBId: empB,
+            fromDateISO: iso,
+            toDateISO: iso,
+          }).catch((e: any) => {
+            // Un día sin turnos de ninguno lanza; lo ignoramos para no cortar el resto.
+            if (/Ninguno de los dos/.test(e.message)) return null
+            throw e
+          })
+          if (r) moved += r.movedFromA + r.movedFromB
+        }
+        toast.success(moved > 0 ? `${moved} turno${moved !== 1 ? 's' : ''} intercambiado${moved !== 1 ? 's' : ''} ✓` : 'No había turnos que intercambiar en esos días')
+        onSwapped()
+      } catch (e: any) {
+        toast.error(e.message)
+      }
+    })
+  }
+
+  function EmpSelect({ value, onChange, exclude, placeholder }: any) {
+    return (
+      <select
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        className="w-full border border-gray-200 rounded-xl px-3 py-2 text-[13px] bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-300 cursor-pointer"
+      >
+        <option value="">{placeholder}</option>
+        {employees.filter((e: any) => e.id !== exclude).map((e: any) => (
+          <option key={e.id} value={e.id}>
+            {e.firstName} {e.lastName}{e.skills?.[0]?.laborRole ? ` · ${e.skills[0].laborRole.name}` : ''}
+          </option>
+        ))}
+      </select>
+    )
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-[3px]" />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-[460px] max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="px-6 py-4 border-b border-gray-100 flex-shrink-0" style={{ background: 'linear-gradient(135deg,#eef2ff,#f5f3ff)' }}>
+          <h3 className="text-[15px] font-bold text-gray-900">Intercambiar turnos de la semana</h3>
+          <p className="text-[11px] text-gray-500 mt-0.5">Elige dos empleados y los días a intercambiar entre ellos.</p>
+        </div>
+
+        <div className="px-6 py-5 space-y-4 overflow-y-auto">
+          {/* Empleado A */}
+          <div>
+            <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Empleado A</label>
+            <EmpSelect value={empA} onChange={setEmpA} exclude={empB} placeholder="Selecciona empleado…" />
+          </div>
+
+          <div className="flex justify-center">
+            <div className="w-8 h-8 rounded-full bg-indigo-50 border border-indigo-200 flex items-center justify-center">
+              <ArrowLeftRight size={14} className="text-indigo-500" />
+            </div>
+          </div>
+
+          {/* Empleado B */}
+          <div>
+            <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Empleado B</label>
+            <EmpSelect value={empB} onChange={setEmpB} exclude={empA} placeholder="Selecciona empleado…" />
+          </div>
+
+          {differentRoles && (
+            <div className="flex items-start gap-2 p-2.5 rounded-xl bg-amber-50 border border-amber-100">
+              <Info size={13} className="text-amber-500 mt-0.5 flex-shrink-0" />
+              <span className="text-[11px] text-amber-700">
+                Roles distintos ({roleA} ↔ {roleB}). El intercambio puede dejar huecos de cobertura por rol.
+              </span>
+            </div>
+          )}
+
+          {/* Días */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Días a intercambiar</label>
+              <button onClick={toggleAll} className="text-[11px] font-medium text-indigo-500 hover:text-indigo-700">
+                {allSelected ? 'Ninguno' : 'Toda la semana'}
+              </button>
+            </div>
+            <div className="grid grid-cols-7 gap-1.5">
+              {weekDays.map((iso: string, i: number) => {
+                const sel = selectedDays.includes(i)
+                const cA = countFor(empA, i)
+                const cB = countFor(empB, i)
+                const dayNum = new Date(iso).getUTCDate()
+                return (
+                  <button
+                    key={iso}
+                    onClick={() => toggleDay(i)}
+                    className={cn(
+                      'flex flex-col items-center py-2 rounded-xl border text-center transition-all',
+                      sel ? 'border-indigo-400 bg-indigo-50' : 'border-gray-200 hover:border-gray-300'
+                    )}
+                  >
+                    <span className={cn('text-[10px] font-semibold uppercase', sel ? 'text-indigo-600' : 'text-gray-400')}>{DAY_LABELS[i]}</span>
+                    <span className={cn('text-[14px] font-bold', sel ? 'text-indigo-700' : 'text-gray-600')}>{dayNum}</span>
+                    {(empA || empB) && (
+                      <span className="text-[9px] text-gray-400 mt-0.5">{cA}·{cB}</span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+            {(empA && empB && selectedDays.length > 0) && (
+              <p className="text-[11px] text-gray-500 mt-2">
+                {totalA} turno{totalA !== 1 ? 's' : ''} de A ↔ {totalB} turno{totalB !== 1 ? 's' : ''} de B en {selectedDays.length} día{selectedDays.length !== 1 ? 's' : ''}
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="flex justify-between px-6 py-4 border-t border-gray-100 bg-gray-50/50 flex-shrink-0">
+          <button onClick={onClose} className="px-4 py-2 rounded-xl text-[13px] text-gray-500 hover:bg-gray-100 transition-colors">Cancelar</button>
+          <button
+            disabled={!canSwap || isPending}
+            onClick={handleSwap}
+            className="flex items-center gap-2 px-5 py-2 rounded-xl bg-indigo-600 text-white text-[13px] font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+          >
+            {isPending ? <Loader2 size={14} className="animate-spin" /> : <ArrowLeftRight size={14} />}
+            Intercambiar
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
