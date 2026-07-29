@@ -2,7 +2,7 @@ export const dynamic = 'force-dynamic'
 
 import { prisma } from '@/lib/prisma'
 import { requireOrgContext } from '@/lib/session'
-import { ensureWeekCoverage, getWeekCoverage } from '@/server/actions/coverageWeekly'
+import { getWeekCoverage } from '@/server/actions/coverageWeekly'
 import { CoverageWeeklyClient } from '@/components/coverage/CoverageWeeklyClient'
 
 // Lunes de la semana ISO que contiene `d`
@@ -22,19 +22,11 @@ export default async function CoveragePage({ searchParams }: { searchParams: { w
     : mondayOf(new Date())
   const weekStartISO = weekStart.toISOString().slice(0, 10)
 
-  // Garantiza que la semana tiene cobertura (hereda de la anterior o de la plantilla)
-  const inheritance = await ensureWeekCoverage(locationId, organizationId, weekStartISO)
-
-  const [slots, roles, skills, activeTemplate, templates] = await Promise.all([
+  // Modelo "lienzo en blanco": cada semana parte vacía; el usuario pinta a mano.
+  const [slots, roles, skills] = await Promise.all([
     getWeekCoverage(locationId, weekStartISO),
     prisma.laborRole.findMany({ where: { organizationId }, orderBy: { priority: 'asc' } }),
     prisma.skill.findMany({ where: { organizationId } }),
-    prisma.coverageTemplate.findFirst({ where: { locationId, isActive: true } }),
-    prisma.coverageTemplate.findMany({
-      where: { locationId },
-      include: { _count: { select: { coverageRequirements: true } } },
-      orderBy: { createdAt: 'asc' },
-    }),
   ])
 
   return (
@@ -45,12 +37,6 @@ export default async function CoveragePage({ searchParams }: { searchParams: { w
       skills={JSON.parse(JSON.stringify(skills))}
       locationId={locationId}
       organizationId={organizationId}
-      inheritance={inheritance}
-      activeTemplateName={activeTemplate?.name ?? null}
-      templates={JSON.parse(JSON.stringify(templates.map(t => ({
-        id: t.id, name: t.name, description: t.description, color: t.color,
-        isActive: t.isActive, slotsCount: t._count.coverageRequirements,
-      }))))}
     />
   )
 }

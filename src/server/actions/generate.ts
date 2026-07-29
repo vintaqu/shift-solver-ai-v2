@@ -5,7 +5,7 @@ import { addDays } from 'date-fns'
 import { prisma } from '@/lib/prisma'
 import { callSolverApi, checkSolverHealth, SolverError, type ScheduleResponse } from '@/lib/scheduler'
 import { buildScheduleRequest, mapResponseToAssignments, extractIssuesFromResponse } from '@/lib/scheduler/mapper'
-import { getActiveTemplate } from '@/server/actions/coverageTemplates'
+import { getWeekCoverage } from '@/server/actions/coverageWeekly'
 import { getAbsenceBlocksForWeek } from '@/server/actions/absences'
 
 // ── Tipos públicos ─────────────────────────────────────────────────────────
@@ -53,9 +53,10 @@ export async function generateSchedule(
   })
   if (!period) return { success: false, error: 'Planning period no encontrado', errorCode: 'NOT_FOUND' }
 
-  // Obtener plantilla de cobertura activa
-  const activeTemplate = await getActiveTemplate(period.locationId)
-  const coverageSlots = activeTemplate?.coverageRequirements ?? []
+  // Cobertura de la semana concreta del periodo (modelo lienzo en blanco:
+  // cada semana tiene su propia cobertura pintada por el usuario).
+  const weekStartISO = new Date(period.weekStart).toISOString().slice(0, 10)
+  const coverageSlots = await getWeekCoverage(period.locationId, weekStartISO)
 
   // 2. Cargar empleados activos con todo lo necesario
   const employees = await prisma.employee.findMany({

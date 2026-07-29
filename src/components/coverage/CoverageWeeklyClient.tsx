@@ -5,14 +5,13 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
   ChevronLeft, ChevronRight, Plus, Loader2, CheckCircle, X,
-  Trash2, Info, RefreshCw, CalendarDays, Copy,
-  Settings, Save, FolderOpen,
+  Trash2, Info, Copy, Save,
+  Settings,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
-  upsertDateSlot, bulkUpsertDateSlots, deleteDateSlot,
-  copyWeekCoverage, copyDayCoverage, clearWeekCoverage, regenerateWeekFromTemplate,
-  saveWeekAsTemplate, importTemplateToWeek,
+  saveWeekCoverage,
+  copyWeeksCoverage, getWeeksWithCoverage,
 } from '@/server/actions/coverageWeekly'
 import { RoleRequirementsEditor, initialRoleRows, type RoleRow } from './RoleRequirementsEditor'
 
@@ -31,6 +30,21 @@ function nextSlot(time: string): string {
   const next = h * 60 + m + 30
   if (next >= 24 * 60) return '00:00'
   return `${String(Math.floor(next / 60)).padStart(2, '0')}:${String(next % 60).padStart(2, '0')}`
+}
+
+// Parte un rango horario en franjas de 30 min. "00:00" de fin = medianoche siguiente.
+function splitIntoHalfHours(startTime: string, endTime: string): Array<{ start: string; end: string }> {
+  const [sh, sm] = startTime.split(':').map(Number)
+  const [eh, em] = endTime === '00:00' ? [24, 0] : endTime.split(':').map(Number)
+  const startMin = sh * 60 + sm
+  const endMin = eh * 60 + em
+  const out: Array<{ start: string; end: string }> = []
+  const fmt = (m: number) => {
+    const mm = m >= 24 * 60 ? m - 24 * 60 : m
+    return `${String(Math.floor(mm / 60)).padStart(2, '0')}:${String(mm % 60).padStart(2, '0')}`
+  }
+  for (let cur = startMin; cur < endMin; cur += 30) out.push({ start: fmt(cur), end: fmt(Math.min(cur + 30, endMin)) })
+  return out
 }
 
 function demandColor(min: number): { bg: string; text: string; border: string; bar: string } {
@@ -130,27 +144,19 @@ interface Props {
   skills: any[]
   locationId: string
   organizationId: string
-  inheritance: { source: 'existing' | 'previous_week' | 'template' | 'empty'; count: number }
-  activeTemplateName: string | null
-  templates?: Array<{ id: string; name: string; description?: string | null; color: string; isActive: boolean; slotsCount: number }>
 }
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 export function CoverageWeeklyClient({
   weekStartISO, slots: initialSlots, roles, skills, locationId, organizationId,
-  inheritance, activeTemplateName, templates = [],
 }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
-  const [showBanner, setShowBanner] = useState(inheritance.source !== 'existing')
   const [editingSlot, setEditingSlot] = useState<Slot | null>(null)
   const [addingSlot, setAddingSlot] = useState<{ date: string; time: string } | null>(null)
-  const [showCopyWeek, setShowCopyWeek] = useState(false)
-  const [showCopyDay, setShowCopyDay] = useState(false)
   const [showClearConfirm, setShowClearConfirm] = useState(false)
+  const [showCopyWeeks, setShowCopyWeeks] = useState(false)
   const [showGearMenu, setShowGearMenu] = useState(false)
-  const [showSaveTemplate, setShowSaveTemplate] = useState(false)
-  const [showImportTemplate, setShowImportTemplate] = useState(false)
   const gearRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -164,16 +170,113 @@ export function CoverageWeeklyClient({
   const weekDates = useMemo(() => Array.from({ length: 7 }, (_, i) => addDaysISO(weekStartISO, i)), [weekStartISO])
 
   // Normalizar fechas de los slots del servidor (llegan como ISO datetime completo)
-  const normalizedSlots = useMemo(() => initialSlots.map(s => ({
+  const serverSlots = useMemo(() => initialSlots.map(s => ({
     ...s,
     date: (s.date as any as string).slice(0, 10),
   })), [initialSlots])
+
+  // ── Borrador local ──────────────────────────────────────────────────────
+  // Toda la edición ocurre en el front sobre `draftSlots`. No se persiste
+  // hasta pulsar "Guardar". Al cambiar de semana (nuevas props) se recarga.
+  const [draftSlots, setDraftSlots] = useState<Slot[]>(serverSlots)
+  const [dirty, setDirty] = useState(false)
+
+  useEffect(() => {
+    // Nueva semana cargada desde el servidor → resetear borrador.
+    setDraftSlots(serverSlots)
+    setDirty(false)
+  }, [serverSlots])
+
+  const normalizedSlots = draftSlots
 
   const slotMap = useMemo(() => {
     const map = new Map<string, Slot>()
     for (const s of normalizedSlots) map.set(`${s.date}|${s.startTime}`, s)
     return map
   }, [normalizedSlots])
+
+  // ── Mutaciones del borrador (solo estado local; nada al backend) ──────────
+
+  // Construye un objeto Slot local a partir de los datos del editor.
+  function buildLocalSlot(date: string, startTime: string, endTime: string, roleRows: any[], isRequired: boolean, notes: string): Slot {
+    const minWorkers = roleRows.reduce((a, r) => a + r.minWorkers, 0)
+    const idealWorkers = roleRows.reduce((a, r) => a + r.idealWorkers, 0)
+    return {
+      id: `draft-${date}-${startTime}-${Math.random().toString(36).slice(2, 8)}`,
+      date, startTime, endTime, minWorkers, idealWorkers,
+      isRequired, notes,
+      roleRequirements: roleRows.map(r => ({
+        laborRoleId: r.laborRoleId,
+        minWorkers: r.minWorkers,
+        idealWorkers: r.idealWorkers,
+        laborRole: roles.find((x: any) => x.id === r.laborRoleId) ?? null,
+      })),
+    } as any
+  }
+
+  // Aplica un slot (crear/editar) sobre una o varias fechas.
+  function applyDraftSlot(dates: string[], startTime: string, endTime: string, roleRows: any[], isRequired: boolean, notes: string, replaceId?: string) {
+    setDraftSlots(prev => {
+      let next = replaceId ? prev.filter(s => (s as any).id !== replaceId) : [...prev]
+      for (const date of dates) {
+        // Sobrescribir cualquier slot existente con misma fecha+inicio.
+        next = next.filter(s => !(s.date === date && s.startTime === startTime))
+        next.push(buildLocalSlot(date, startTime, endTime, roleRows, isRequired, notes))
+      }
+      return next
+    })
+    setDirty(true)
+  }
+
+  // Aplica un rango horario (masivo) partido en franjas de 30 min a varias fechas.
+  function applyDraftBulk(dates: string[], startTime: string, endTime: string, roleRows: any[], isRequired: boolean, notes: string) {
+    const franjas = splitIntoHalfHours(startTime, endTime)
+    setDraftSlots(prev => {
+      let next = [...prev]
+      for (const date of dates) {
+        for (const f of franjas) {
+          next = next.filter(s => !(s.date === date && s.startTime === f.start))
+          next.push(buildLocalSlot(date, f.start, f.end, roleRows, isRequired, notes))
+        }
+      }
+      return next
+    })
+    setDirty(true)
+  }
+
+  function deleteDraftSlot(id: string) {
+    setDraftSlots(prev => prev.filter(s => (s as any).id !== id))
+    setDirty(true)
+  }
+
+  function clearDraft() {
+    setDraftSlots([])
+    setDirty(true)
+  }
+
+  // Persistir el borrador completo de la semana.
+  function saveDraft() {
+    startTransition(async () => {
+      try {
+        const payload = draftSlots.map(s => ({
+          startTime: s.startTime,
+          endTime: s.endTime,
+          isRequired: s.isRequired,
+          notes: s.notes ?? null,
+          dateISO: s.date,
+          roles: ((s as any).roleRequirements ?? []).map((rr: any) => ({
+            laborRoleId: rr.laborRoleId,
+            minWorkers: rr.minWorkers,
+            idealWorkers: rr.idealWorkers,
+          })),
+        }))
+        const r = await saveWeekCoverage({ locationId, organizationId, weekStartISO, slots: payload })
+        toast.success(`Semana guardada · ${r.saved} slots ✓`)
+        setDirty(false)
+        router.refresh()
+      } catch (e: any) { toast.error(e.message) }
+    })
+  }
 
   // Rango horario visible: min/max de los slots existentes, o 06:00-23:30 por defecto
   const visibleTimes = useMemo(() => {
@@ -195,14 +298,6 @@ export function CoverageWeeklyClient({
   function goToWeek(newWeekStartISO: string) {
     router.push(`/coverage?week=${newWeekStartISO}`)
   }
-
-  const bannerText = inheritance.source === 'previous_week'
-    ? `Esta semana se ha copiado automáticamente de la semana anterior (${inheritance.count} slots).`
-    : inheritance.source === 'template'
-    ? `Esta semana se ha generado desde la plantilla activa${activeTemplateName ? ` "${activeTemplateName}"` : ''} (${inheritance.count} slots).`
-    : inheritance.source === 'empty'
-    ? 'Esta semana no tiene cobertura configurada todavía.'
-    : null
 
   return (
     <div className="flex flex-col h-[calc(100vh-52px)] overflow-hidden bg-[#F7F8FA]">
@@ -233,9 +328,26 @@ export function CoverageWeeklyClient({
         </div>
 
         <div className="flex items-center gap-2">
+          {dirty && (
+            <span className="text-[11px] font-medium text-amber-600 flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-500" /> Cambios sin guardar
+            </span>
+          )}
+
           <button onClick={() => setAddingSlot({ date: weekDates[0], time: '09:00' })}
-            className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-indigo-600 text-white text-[12px] font-semibold hover:bg-indigo-700 transition-colors">
+            className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl border border-gray-200 bg-white text-gray-600 text-[12px] font-semibold hover:bg-gray-50 transition-colors">
             <Plus size={14} /> Añadir slot
+          </button>
+
+          <button onClick={() => setShowCopyWeeks(true)}
+            className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl border border-gray-200 bg-white text-gray-600 text-[12px] font-semibold hover:bg-gray-50 transition-colors">
+            <Copy size={14} /> Copiar semanas
+          </button>
+
+          <button onClick={saveDraft} disabled={isPending || !dirty}
+            className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-indigo-600 text-white text-[12px] font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+            {isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+            Guardar
           </button>
 
           {/* ── Menú de acciones (engranaje) ── */}
@@ -248,54 +360,13 @@ export function CoverageWeeklyClient({
 
             {showGearMenu && (
               <div className="absolute right-0 top-11 z-30 w-[260px] bg-white rounded-2xl border border-gray-200 shadow-xl overflow-hidden py-1.5">
-                <div className="px-3.5 py-1.5 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Copiar</div>
-                <MenuItem icon={<Copy size={14} />} label="Copiar un día…" desc="De cualquier fecha a otra"
-                  onClick={() => { setShowGearMenu(false); setShowCopyDay(true) }} />
-                <MenuItem icon={<CalendarDays size={14} />} label="Copiar una semana…" desc="De cualquier semana del año a otra"
-                  onClick={() => { setShowGearMenu(false); setShowCopyWeek(true) }} />
-
-                <div className="my-1 border-t border-gray-100" />
-                <div className="px-3.5 py-1.5 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Plantillas</div>
-                <MenuItem icon={<Save size={14} />} label="Guardar semana como plantilla" desc="Reutilízala más adelante"
-                  onClick={() => { setShowGearMenu(false); setShowSaveTemplate(true) }} />
-                <MenuItem icon={<FolderOpen size={14} />} label="Importar plantilla…" desc={`${templates.filter(t => t.slotsCount > 0).length} disponibles`}
-                  onClick={() => { setShowGearMenu(false); setShowImportTemplate(true) }} />
-                {activeTemplateName && (
-                  <MenuItem icon={<RefreshCw size={14} />} label="Regenerar desde plantilla activa" desc={activeTemplateName}
-                    onClick={() => {
-                      setShowGearMenu(false)
-                      startTransition(async () => {
-                        try {
-                          const r = await regenerateWeekFromTemplate(locationId, organizationId, weekStartISO)
-                          toast.success(`${r.count} slots regenerados desde "${r.templateName}" ✓`)
-                          router.refresh()
-                        } catch (e: any) { toast.error(e.message) }
-                      })
-                    }} />
-                )}
-
-                <div className="my-1 border-t border-gray-100" />
-                <MenuItem icon={<Trash2 size={14} />} label="Borrar toda la semana" desc="No se puede deshacer" danger
+                <MenuItem icon={<Trash2 size={14} />} label="Vaciar la semana" desc="Borra el borrador de esta semana" danger
                   onClick={() => { setShowGearMenu(false); setShowClearConfirm(true) }} />
               </div>
             )}
           </div>
         </div>
       </div>
-
-      {/* ── Banner de herencia ── */}
-      {showBanner && bannerText && (
-        <div className={cn(
-          'flex-shrink-0 px-6 py-2 flex items-center gap-2 text-[12px] border-b',
-          inheritance.source === 'empty' ? 'bg-amber-50 text-amber-700 border-amber-100' : 'bg-blue-50 text-blue-700 border-blue-100'
-        )}>
-          <Info size={13} className="flex-shrink-0" />
-          <span className="flex-1">{bannerText}</span>
-          <button onClick={() => setShowBanner(false)} className="text-current opacity-60 hover:opacity-100">
-            <X size={13} />
-          </button>
-        </div>
-      )}
 
       {/* ── KPIs ── */}
       <div className="flex-shrink-0 flex items-center gap-6 px-6 py-2.5 bg-white border-b border-gray-100 text-[12px]">
@@ -392,57 +463,31 @@ export function CoverageWeeklyClient({
           defaultDate={addingSlot?.date}
           defaultTime={addingSlot?.time}
           weekDates={weekDates}
-          locationId={locationId}
-          organizationId={organizationId}
           roles={roles}
           onClose={() => { setEditingSlot(null); setAddingSlot(null) }}
-          onSaved={() => { setEditingSlot(null); setAddingSlot(null); router.refresh() }}
+          onApplyOne={(dates: string[], startTime: string, endTime: string, roleRows: any[], isRequired: boolean, notes: string) => {
+            applyDraftSlot(dates, startTime, endTime, roleRows, isRequired, notes, editingSlot ? (editingSlot as any).id : undefined)
+            setEditingSlot(null); setAddingSlot(null)
+          }}
+          onApplyBulk={(dates: string[], startTime: string, endTime: string, roleRows: any[], isRequired: boolean, notes: string) => {
+            applyDraftBulk(dates, startTime, endTime, roleRows, isRequired, notes)
+            setEditingSlot(null); setAddingSlot(null)
+          }}
+          onDeleteSlot={() => {
+            if (editingSlot) deleteDraftSlot((editingSlot as any).id)
+            setEditingSlot(null); setAddingSlot(null)
+          }}
         />
       )}
 
-      {/* ── Modal copiar día ── */}
-      {showCopyDay && (
-        <CopyDayModal
-          weekDates={weekDates}
-          locationId={locationId}
-          organizationId={organizationId}
-          onClose={() => setShowCopyDay(false)}
-          onCopied={() => { setShowCopyDay(false); router.refresh() }}
-        />
-      )}
-
-      {/* ── Modal copiar semana ── */}
-      {showCopyWeek && (
-        <CopyWeekModal
+      {showCopyWeeks && (
+        <CopyWeeksModal
           weekStartISO={weekStartISO}
           locationId={locationId}
           organizationId={organizationId}
-          onClose={() => setShowCopyWeek(false)}
-          onCopied={(targetWeek: string) => { setShowCopyWeek(false); goToWeek(targetWeek) }}
-        />
-      )}
-
-      {/* ── Modal guardar semana como plantilla ── */}
-      {showSaveTemplate && (
-        <SaveTemplateModal
-          weekStartISO={weekStartISO}
-          slotsCount={kpis.total}
-          locationId={locationId}
-          organizationId={organizationId}
-          onClose={() => setShowSaveTemplate(false)}
-          onSaved={() => { setShowSaveTemplate(false); router.refresh() }}
-        />
-      )}
-
-      {/* ── Modal importar plantilla ── */}
-      {showImportTemplate && (
-        <ImportTemplateModal
-          templates={templates}
-          weekStartISO={weekStartISO}
-          locationId={locationId}
-          organizationId={organizationId}
-          onClose={() => setShowImportTemplate(false)}
-          onImported={() => { setShowImportTemplate(false); router.refresh() }}
+          dirty={dirty}
+          onClose={() => setShowCopyWeeks(false)}
+          onCopied={() => { setShowCopyWeeks(false); router.refresh() }}
         />
       )}
 
@@ -451,24 +496,16 @@ export function CoverageWeeklyClient({
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={() => setShowClearConfirm(false)} />
           <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-[400px] p-6">
-            <h3 className="text-[15px] font-bold text-gray-900 mb-2">¿Borrar toda la cobertura de esta semana?</h3>
+            <h3 className="text-[15px] font-bold text-gray-900 mb-2">¿Vaciar la cobertura de esta semana?</h3>
             <p className="text-[13px] text-gray-500 mb-5">
-              Se eliminarán <strong>{kpis.total} slots</strong> de la semana del {weekRangeLabel(weekStartISO)}. Esta acción no se puede deshacer.
+              Se quitarán <strong>{kpis.total} slots</strong> del borrador de la semana del {weekRangeLabel(weekStartISO)}. El cambio no se guarda hasta que pulses «Guardar».
             </p>
             <div className="flex justify-end gap-2">
               <button onClick={() => setShowClearConfirm(false)} className="px-4 py-2 rounded-xl text-[13px] text-gray-500 hover:bg-gray-100">Cancelar</button>
               <button
-                disabled={isPending}
-                onClick={() => startTransition(async () => {
-                  try {
-                    const r = await clearWeekCoverage(locationId, weekStartISO)
-                    toast.success(`${r.deleted} slots eliminados`)
-                    setShowClearConfirm(false)
-                    router.refresh()
-                  } catch (e: any) { toast.error(e.message) }
-                })}
-                className="px-5 py-2 rounded-xl bg-red-600 text-white text-[13px] font-semibold hover:bg-red-700 disabled:opacity-50">
-                Sí, borrar todo
+                onClick={() => { clearDraft(); setShowClearConfirm(false) }}
+                className="px-5 py-2 rounded-xl bg-red-600 text-white text-[13px] font-semibold hover:bg-red-700">
+                Sí, vaciar
               </button>
             </div>
           </div>
@@ -479,8 +516,7 @@ export function CoverageWeeklyClient({
 }
 
 // ─── Modal: crear/editar slot ──────────────────────────────────────────────────
-function SlotModal({ slot, defaultDate, defaultTime, weekDates, locationId, organizationId, roles, onClose, onSaved }: any) {
-  const [isPending, startTransition] = useTransition()
+function SlotModal({ slot, defaultDate, defaultTime, weekDates, roles, onClose, onApplyOne, onApplyBulk, onDeleteSlot }: any) {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const isEdit = !!slot
   const [form, setForm] = useState({
@@ -599,11 +635,9 @@ function SlotModal({ slot, defaultDate, defaultTime, weekDates, locationId, orga
             {confirmDelete ? (
               <>
                 <span className="text-[12px] text-red-600 font-medium">¿Eliminar este slot?</span>
-                <button disabled={isPending} onClick={() => startTransition(async () => {
-                  try { await deleteDateSlot(slot.id); toast.success('Slot eliminado'); onSaved() } catch (e: any) { toast.error(e.message) }
-                  setConfirmDelete(false)
-                })} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 transition-colors">
-                  {isPending ? <Loader2 size={12} className="animate-spin" /> : null} Sí, eliminar
+                <button onClick={() => { onDeleteSlot(); setConfirmDelete(false) }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] bg-red-600 text-white hover:bg-red-700 transition-colors">
+                  Sí, eliminar
                 </button>
                 <button onClick={() => setConfirmDelete(false)} className="px-3 py-1.5 rounded-lg text-[12px] text-gray-500 hover:bg-gray-100 transition-colors">Cancelar</button>
               </>
@@ -611,8 +645,8 @@ function SlotModal({ slot, defaultDate, defaultTime, weekDates, locationId, orga
               <>
                 <button onClick={onClose} className="px-4 py-2 rounded-xl text-[13px] text-gray-500 hover:bg-gray-100 transition-colors">Cancelar</button>
                 {isEdit && (
-                  <button onClick={() => setConfirmDelete(true)} disabled={isPending}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[13px] text-red-500 hover:bg-red-50 border border-red-200 transition-colors disabled:opacity-50">
+                  <button onClick={() => setConfirmDelete(true)}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[13px] text-red-500 hover:bg-red-50 border border-red-200 transition-colors">
                     <Trash2 size={13} /> Eliminar slot
                   </button>
                 )}
@@ -620,38 +654,22 @@ function SlotModal({ slot, defaultDate, defaultTime, weekDates, locationId, orga
             )}
           </div>
           <button
-            disabled={isPending || (!isEdit && form.dates.length === 0) || roleRows.length === 0 || totals.ideal === 0}
-            onClick={() => startTransition(async () => {
-              try {
-                const rolesPayload = roleRows.map(r => ({
-                  laborRoleId: r.laborRoleId,
-                  minWorkers: r.minWorkers,
-                  idealWorkers: r.idealWorkers,
-                }))
-                if (isEdit) {
-                  await upsertDateSlot({
-                    id: slot.id, locationId, organizationId, dateISO: slot.date,
-                    startTime: form.startTime, endTime: form.endTime,
-                    roles: rolesPayload, isRequired: form.isRequired, notes: form.notes,
-                  })
-                  toast.success('Slot actualizado ✓')
-                } else {
-                  const result = await bulkUpsertDateSlots({
-                    locationId, organizationId, datesISO: form.dates,
-                    startTime: form.startTime, endTime: form.endTime,
-                    roles: rolesPayload, isRequired: form.isRequired, notes: form.notes,
-                  })
-                  const parts = []
-                  if (result.updated > 0) parts.push(`${result.updated} actualizados`)
-                  if (result.created > 0) parts.push(`${result.created} creados`)
-                  toast.success(`Slots: ${parts.join(' · ') || 'sin cambios'} ✓`)
-                }
-                onSaved()
-              } catch (e: any) { toast.error(e.message) }
-            })}
+            disabled={(!isEdit && form.dates.length === 0) || roleRows.length === 0 || totals.ideal === 0}
+            onClick={() => {
+              const rolesPayload = roleRows.map(r => ({
+                laborRoleId: r.laborRoleId,
+                minWorkers: r.minWorkers,
+                idealWorkers: r.idealWorkers,
+              }))
+              if (isEdit) {
+                onApplyOne([slot.date], form.startTime, form.endTime, rolesPayload, form.isRequired, form.notes)
+              } else {
+                onApplyBulk(form.dates, form.startTime, form.endTime, rolesPayload, form.isRequired, form.notes)
+              }
+            }}
             className="flex items-center gap-2 px-5 py-2 rounded-xl bg-indigo-600 text-white text-[13px] font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors">
-            {isPending ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
-            {isEdit ? 'Guardar cambios' : 'Crear slot'}
+            <CheckCircle size={14} />
+            {isEdit ? 'Aplicar cambios' : 'Añadir slots'}
           </button>
         </div>
       </div>
@@ -674,228 +692,182 @@ function MenuItem({ icon, label, desc, danger, onClick }: any) {
   )
 }
 
-// ─── Modal: copiar día (cualquier fecha → cualquier fecha) ─────────────────────
-function CopyDayModal({ weekDates, locationId, organizationId, onClose, onCopied }: any) {
-  const [isPending, startTransition] = useTransition()
-  const [fromDate, setFromDate] = useState<string>(weekDates[0])
-  const [toDate, setToDate] = useState<string>('')
+// ─── Modal: copiar semanas (selección múltiple sobre calendario) ───────────────
+// Se seleccionan una o varias semanas ORIGEN (que tengan cobertura) y luego un
+// lunes DESTINO. Las semanas origen se pegan consecutivas desde el destino.
+function CopyWeeksModal({ weekStartISO, locationId, organizationId, dirty, onClose, onCopied }: any) {
+  const [pending, setPending] = useState(false)
+  const [year, setYear] = useState<number>(new Date(weekStartISO).getUTCFullYear())
+  const [weeksWithCoverage, setWeeksWithCoverage] = useState<Set<string>>(new Set())
+  const [loading, setLoading] = useState(true)
+  const [selectedSources, setSelectedSources] = useState<string[]>([]) // lunes ISO
+  const [target, setTarget] = useState<string | null>(null)            // lunes ISO destino
+  const [phase, setPhase] = useState<'source' | 'target'>('source')
 
-  const fromLabel = fromDate ? fmtDayLabel(fromDate) : null
-  const toLabel = toDate ? fmtDayLabel(toDate) : null
+  useEffect(() => {
+    let alive = true
+    setLoading(true)
+    getWeeksWithCoverage(locationId, year)
+      .then((mondays: string[]) => { if (alive) { setWeeksWithCoverage(new Set(mondays)); setLoading(false) } })
+      .catch(() => { if (alive) setLoading(false) })
+    return () => { alive = false }
+  }, [locationId, year])
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-[3px]" />
-      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-[420px]" onClick={e => e.stopPropagation()}>
-        <div className="px-6 py-4 border-b border-gray-100" style={{ background: 'linear-gradient(135deg,#eef2ff,#f5f3ff)' }}>
-          <h3 className="text-[15px] font-bold text-gray-900">Copiar un día a otro</h3>
-          <p className="text-[11px] text-gray-500 mt-0.5">Puedes elegir cualquier fecha del calendario</p>
-        </div>
-        <div className="px-6 py-5 space-y-4">
-          <Field label="Día origen">
-            <input type="date" className={inputCls()} value={fromDate} onChange={e => setFromDate(e.target.value)} />
-            {fromLabel && <p className="text-[11px] text-gray-400 mt-1">{fromLabel.dayName} {fromLabel.dayNum} {fromLabel.month} · Semana {isoWeekNumber(fromDate)}</p>}
-          </Field>
-          <div className="flex justify-center text-gray-300 text-[16px]">↓</div>
-          <Field label="Día destino">
-            <input type="date" className={inputCls()} value={toDate} onChange={e => setToDate(e.target.value)} />
-            {toLabel && <p className="text-[11px] text-gray-400 mt-1">{toLabel.dayName} {toLabel.dayNum} {toLabel.month} · Semana {isoWeekNumber(toDate)}</p>}
-          </Field>
-          {toDate && (
-            <p className="text-[11px] text-amber-600">⚠️ La cobertura existente del día destino se reemplazará.</p>
-          )}
-        </div>
-        <div className="flex justify-between px-6 py-4 border-t border-gray-100 bg-gray-50/50">
-          <button onClick={onClose} className="px-4 py-2 rounded-xl text-[13px] text-gray-500 hover:bg-gray-100">Cancelar</button>
-          <button
-            disabled={isPending || !fromDate || !toDate || fromDate === toDate}
-            onClick={() => startTransition(async () => {
-              try {
-                const r = await copyDayCoverage(locationId, organizationId, fromDate, toDate)
-                toast.success(`${r.copied} slots copiados ✓`)
-                onCopied()
-              } catch (e: any) { toast.error(e.message) }
-            })}
-            className="flex items-center gap-2 px-5 py-2 rounded-xl bg-indigo-600 text-white text-[13px] font-semibold hover:bg-indigo-700 disabled:opacity-50">
-            {isPending ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
-            Copiar día
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
+  // Lunes de todas las semanas ISO del año (para pintar la rejilla).
+  const weeks = useMemo(() => {
+    const first = new Date(Date.UTC(year, 0, 1))
+    const dow = (first.getUTCDay() + 6) % 7
+    const firstMonday = new Date(first)
+    firstMonday.setUTCDate(firstMonday.getUTCDate() - dow)
+    const out: string[] = []
+    const cur = new Date(firstMonday)
+    while (cur.getUTCFullYear() <= year) {
+      out.push(cur.toISOString().slice(0, 10))
+      cur.setUTCDate(cur.getUTCDate() + 7)
+      if (cur.getUTCFullYear() > year && (cur.getUTCMonth() > 0 || cur.getUTCDate() > 7)) break
+    }
+    return out
+  }, [year])
 
-// ─── Modal: copiar semana (cualquier semana del año → otra) ────────────────────
-function CopyWeekModal({ weekStartISO, locationId, organizationId, onClose, onCopied }: any) {
-  const [isPending, startTransition] = useTransition()
-  const [fromPick, setFromPick] = useState<string>(weekStartISO)
-  const [toPick, setToPick] = useState<string>('')
+  function toggleSource(monday: string) {
+    setSelectedSources(prev => prev.includes(monday) ? prev.filter(m => m !== monday) : [...prev, monday].sort())
+  }
 
-  // Normalizar cualquier fecha elegida al lunes de su semana
-  const fromWeek = fromPick ? mondayOfISO(fromPick) : ''
-  const toWeek = toPick ? mondayOfISO(toPick) : ''
+  const sortedSources = useMemo(() => [...selectedSources].sort(), [selectedSources])
 
-  function WeekInfo({ weekISO }: { weekISO: string }) {
-    if (!weekISO) return null
-    return (
-      <p className="text-[11px] text-gray-400 mt-1">
-        <strong className="text-indigo-600">Semana {isoWeekNumber(weekISO)}</strong> · {weekRangeLabel(weekISO)}
-      </p>
-    )
+  // Semanas destino que se pintarán (consecutivas desde el target).
+  const targetWeeks = useMemo(() => {
+    if (!target || sortedSources.length === 0) return []
+    const out: string[] = []
+    const cur = new Date(target + 'T00:00:00Z')
+    for (let i = 0; i < sortedSources.length; i++) {
+      out.push(cur.toISOString().slice(0, 10))
+      cur.setUTCDate(cur.getUTCDate() + 7)
+    }
+    return out
+  }, [target, sortedSources])
+
+  function fmtWeek(monday: string): string {
+    const d = new Date(monday + 'T00:00:00Z')
+    const end = new Date(d); end.setUTCDate(end.getUTCDate() + 6)
+    const m = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
+    return `${d.getUTCDate()} ${m[d.getUTCMonth()]} – ${end.getUTCDate()} ${m[end.getUTCMonth()]}`
+  }
+
+  function handleCopy() {
+    if (sortedSources.length === 0 || !target) return
+    setPending(true)
+    ;(async () => {
+      try {
+        const r = await copyWeeksCoverage({
+          locationId, organizationId,
+          sourceWeekMondaysISO: sortedSources,
+          targetWeekMondayISO: target,
+        })
+        toast.success(`${r.weeksCopied} semana(s) copiadas · ${r.slotsCopied} slots ✓`)
+        onCopied()
+      } catch (e: any) { toast.error(e.message) }
+      finally { setPending(false) }
+    })()
   }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="absolute inset-0 bg-black/40 backdrop-blur-[3px]" />
-      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-[420px]" onClick={e => e.stopPropagation()}>
-        <div className="px-6 py-4 border-b border-gray-100" style={{ background: 'linear-gradient(135deg,#eef2ff,#f5f3ff)' }}>
-          <h3 className="text-[15px] font-bold text-gray-900">Copiar una semana a otra</h3>
-          <p className="text-[11px] text-gray-500 mt-0.5">Elige cualquier fecha — se usará la semana completa que la contiene</p>
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-[560px] max-h-[88vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="px-6 py-4 border-b border-gray-100 flex-shrink-0" style={{ background: 'linear-gradient(135deg,#eef2ff,#f5f3ff)' }}>
+          <h3 className="text-[15px] font-bold text-gray-900">Copiar semanas</h3>
+          <p className="text-[11px] text-gray-500 mt-0.5">
+            {phase === 'source'
+              ? 'Selecciona una o varias semanas con cobertura para copiar.'
+              : 'Elige la semana destino. Se pegarán consecutivas desde ahí.'}
+          </p>
         </div>
-        <div className="px-6 py-5 space-y-4">
-          <Field label="Semana origen">
-            <input type="date" className={inputCls()} value={fromPick} onChange={e => setFromPick(e.target.value)} />
-            <WeekInfo weekISO={fromWeek} />
-          </Field>
-          <div className="flex justify-center text-gray-300 text-[16px]">↓</div>
-          <Field label="Semana destino">
-            <input type="date" className={inputCls()} value={toPick} onChange={e => setToPick(e.target.value)} />
-            <WeekInfo weekISO={toWeek} />
-          </Field>
-          {toWeek && (
-            <p className="text-[11px] text-amber-600">⚠️ La cobertura existente de la semana destino se reemplazará.</p>
+
+        {dirty && (
+          <div className="mx-6 mt-3 flex items-start gap-2 p-2.5 rounded-xl bg-amber-50 border border-amber-100">
+            <Info size={13} className="text-amber-500 mt-0.5 flex-shrink-0" />
+            <span className="text-[11px] text-amber-700">Tienes cambios sin guardar en la semana actual. Copiar recarga desde el servidor y se perderán.</span>
+          </div>
+        )}
+
+        {/* Navegador de año */}
+        <div className="flex items-center justify-center gap-4 px-6 py-3 flex-shrink-0">
+          <button onClick={() => setYear(y => y - 1)} className="p-1 rounded hover:bg-gray-100 text-gray-500"><ChevronLeft size={16} /></button>
+          <span className="text-[14px] font-bold text-gray-800">{year}</span>
+          <button onClick={() => setYear(y => y + 1)} className="p-1 rounded hover:bg-gray-100 text-gray-500"><ChevronRight size={16} /></button>
+        </div>
+
+        {/* Rejilla de semanas */}
+        <div className="px-6 pb-2 overflow-y-auto flex-1">
+          {loading ? (
+            <div className="flex justify-center py-8"><Loader2 size={20} className="animate-spin text-gray-300" /></div>
+          ) : (
+            <div className="grid grid-cols-2 gap-1.5">
+              {weeks.map(monday => {
+                const hasCoverage = weeksWithCoverage.has(monday)
+                const isSource = selectedSources.includes(monday)
+                const isTarget = targetWeeks.includes(monday)
+                const targetIdx = targetWeeks.indexOf(monday)
+                const selectable = phase === 'source' ? hasCoverage : true
+                return (
+                  <button
+                    key={monday}
+                    disabled={!selectable}
+                    onClick={() => phase === 'source' ? toggleSource(monday) : setTarget(monday)}
+                    className={cn(
+                      'flex items-center justify-between px-3 py-2 rounded-xl border text-left transition-all',
+                      isSource ? 'border-indigo-400 bg-indigo-50' :
+                      isTarget ? 'border-emerald-400 bg-emerald-50' :
+                      selectable ? 'border-gray-200 hover:border-gray-300' : 'border-gray-100 bg-gray-50/50 opacity-40 cursor-not-allowed'
+                    )}
+                  >
+                    <span className={cn('text-[12px] font-medium', isSource ? 'text-indigo-700' : isTarget ? 'text-emerald-700' : 'text-gray-600')}>
+                      {fmtWeek(monday)}
+                    </span>
+                    {isTarget
+                      ? <span className="text-[9px] font-bold text-emerald-600">#{targetIdx + 1}</span>
+                      : hasCoverage && phase === 'source'
+                      ? <span className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
+                      : null}
+                  </button>
+                )
+              })}
+            </div>
           )}
         </div>
-        <div className="flex justify-between px-6 py-4 border-t border-gray-100 bg-gray-50/50">
-          <button onClick={onClose} className="px-4 py-2 rounded-xl text-[13px] text-gray-500 hover:bg-gray-100">Cancelar</button>
-          <button
-            disabled={isPending || !fromWeek || !toWeek || fromWeek === toWeek}
-            onClick={() => startTransition(async () => {
-              try {
-                const r = await copyWeekCoverage(locationId, organizationId, fromWeek, toWeek)
-                toast.success(`${r.copied} slots copiados a la semana ${isoWeekNumber(toWeek)} ✓`)
-                onCopied(toWeek)
-              } catch (e: any) { toast.error(e.message) }
-            })}
-            className="flex items-center gap-2 px-5 py-2 rounded-xl bg-indigo-600 text-white text-[13px] font-semibold hover:bg-indigo-700 disabled:opacity-50">
-            {isPending ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
-            Copiar semana
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
 
-// ─── Modal: guardar semana como plantilla ──────────────────────────────────────
-function SaveTemplateModal({ weekStartISO, slotsCount, locationId, organizationId, onClose, onSaved }: any) {
-  const [isPending, startTransition] = useTransition()
-  const [name, setName] = useState('')
-  const [description, setDescription] = useState('')
-  const [color, setColor] = useState('#6366f1')
-  const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#0891b2', '#ec4899', '#64748b', '#84cc16']
+        {/* Resumen */}
+        {phase === 'target' && sortedSources.length > 0 && (
+          <div className="px-6 py-2 text-[11px] text-gray-500 flex-shrink-0">
+            Copiando <strong>{sortedSources.length}</strong> semana(s){target ? <> → destino desde <strong>{fmtWeek(target)}</strong></> : null}
+          </div>
+        )}
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-[3px]" />
-      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-[420px]" onClick={e => e.stopPropagation()}>
-        <div className="px-6 py-4 border-b border-gray-100" style={{ background: 'linear-gradient(135deg,#f0fdf4,#dcfce7)' }}>
-          <h3 className="text-[15px] font-bold text-gray-900">Guardar semana como plantilla</h3>
-          <p className="text-[11px] text-gray-500 mt-0.5">
-            Semana {isoWeekNumber(weekStartISO)} ({weekRangeLabel(weekStartISO)}) · {slotsCount} slots
-          </p>
-        </div>
-        <div className="px-6 py-5 space-y-4">
-          <Field label="Nombre de la plantilla *">
-            <input className={inputCls()} value={name} onChange={e => setName(e.target.value)}
-              placeholder="Ej: Semana estándar, Verano terraza…" autoFocus />
-          </Field>
-          <Field label="Descripción (opcional)">
-            <input className={inputCls()} value={description} onChange={e => setDescription(e.target.value)}
-              placeholder="Breve descripción…" />
-          </Field>
-          <Field label="Color">
-            <div className="flex gap-2 flex-wrap">
-              {COLORS.map(c => (
-                <button key={c} onClick={() => setColor(c)}
-                  className={cn('w-7 h-7 rounded-lg transition-all', color === c ? 'ring-2 ring-offset-1 ring-gray-500 scale-110' : 'hover:scale-110')}
-                  style={{ backgroundColor: c }} />
-              ))}
-            </div>
-          </Field>
-        </div>
-        <div className="flex justify-between px-6 py-4 border-t border-gray-100 bg-gray-50/50">
-          <button onClick={onClose} className="px-4 py-2 rounded-xl text-[13px] text-gray-500 hover:bg-gray-100">Cancelar</button>
-          <button
-            disabled={isPending || !name.trim() || slotsCount === 0}
-            onClick={() => startTransition(async () => {
-              try {
-                const r = await saveWeekAsTemplate(locationId, organizationId, weekStartISO, {
-                  name: name.trim(), description: description.trim() || undefined, color,
-                })
-                toast.success(`Plantilla "${r.name}" guardada (${r.count} slots) ✓`)
-                onSaved()
-              } catch (e: any) { toast.error(e.message) }
-            })}
-            className="flex items-center gap-2 px-5 py-2 rounded-xl bg-emerald-600 text-white text-[13px] font-semibold hover:bg-emerald-700 disabled:opacity-50">
-            {isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-            Guardar plantilla
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ─── Modal: importar plantilla a la semana actual ──────────────────────────────
-function ImportTemplateModal({ templates, weekStartISO, locationId, organizationId, onClose, onImported }: any) {
-  const [isPending, startTransition] = useTransition()
-  const usable = templates.filter((t: any) => t.slotsCount > 0)
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-[3px]" />
-      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-[440px] flex flex-col max-h-[80vh]" onClick={e => e.stopPropagation()}>
-        <div className="px-6 py-4 border-b border-gray-100 flex-shrink-0" style={{ background: 'linear-gradient(135deg,#eef2ff,#f5f3ff)' }}>
-          <h3 className="text-[15px] font-bold text-gray-900">Importar plantilla</h3>
-          <p className="text-[11px] text-gray-500 mt-0.5">
-            Se aplicará a la semana {isoWeekNumber(weekStartISO)} ({weekRangeLabel(weekStartISO)}). La cobertura actual se reemplazará y esta plantilla pasará a ser la activa.
-          </p>
-        </div>
-        <div className="px-6 py-4 space-y-2 overflow-y-auto flex-1">
-          {usable.length === 0 ? (
-            <p className="text-[13px] text-gray-400 text-center py-6">
-              No hay plantillas con slots configurados.<br />
-              <span className="text-[11px]">Guarda primero una semana como plantilla desde el menú ⚙️</span>
-            </p>
-          ) : usable.map((t: any) => (
-            <button
-              key={t.id}
-              disabled={isPending}
-              onClick={() => startTransition(async () => {
-                try {
-                  const r = await importTemplateToWeek(t.id, locationId, organizationId, weekStartISO)
-                  toast.success(`${r.count} slots importados desde "${r.templateName}" ✓`)
-                  onImported()
-                } catch (e: any) { toast.error(e.message) }
-              })}
-              className="w-full flex items-center gap-3 p-3 rounded-xl border border-gray-200 hover:border-indigo-300 hover:bg-indigo-50 transition-all text-left disabled:opacity-50">
-              <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: t.color }} />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-[13px] font-semibold text-gray-800 truncate">{t.name}</span>
-                  {t.isActive && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Activa</span>}
-                </div>
-                {t.description && <div className="text-[11px] text-gray-400 truncate">{t.description}</div>}
-                <div className="text-[10px] text-gray-400">{t.slotsCount} slots</div>
-              </div>
-              {isPending ? <Loader2 size={14} className="animate-spin text-indigo-400" /> : <FolderOpen size={14} className="text-indigo-400 flex-shrink-0" />}
-            </button>
-          ))}
-        </div>
-        <div className="px-6 py-3 border-t border-gray-100 bg-gray-50/50 flex-shrink-0">
-          <button onClick={onClose} className="w-full py-2 rounded-xl text-[13px] text-gray-500 hover:bg-gray-100">Cancelar</button>
+        <div className="flex justify-between items-center px-6 py-4 border-t border-gray-100 bg-gray-50/50 flex-shrink-0">
+          <button onClick={onClose} className="px-4 py-2 rounded-xl text-[13px] text-gray-500 hover:bg-gray-100 transition-colors">Cancelar</button>
+          <div className="flex gap-2">
+            {phase === 'target' && (
+              <button onClick={() => { setPhase('source'); setTarget(null) }}
+                className="px-4 py-2 rounded-xl text-[13px] text-gray-500 hover:bg-gray-100 transition-colors">Atrás</button>
+            )}
+            {phase === 'source' ? (
+              <button
+                disabled={sortedSources.length === 0}
+                onClick={() => setPhase('target')}
+                className="px-5 py-2 rounded-xl bg-indigo-600 text-white text-[13px] font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+                Siguiente ({sortedSources.length})
+              </button>
+            ) : (
+              <button
+                disabled={!target || pending}
+                onClick={handleCopy}
+                className="flex items-center gap-2 px-5 py-2 rounded-xl bg-indigo-600 text-white text-[13px] font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+                {pending ? <Loader2 size={14} className="animate-spin" /> : <Copy size={14} />}
+                Copiar aquí
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>
