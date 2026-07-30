@@ -11,7 +11,7 @@ import {
 import { cn } from '@/lib/utils'
 import {
   saveWeekCoverage,
-  copyWeeksCoverage, getWeeksWithCoverage,
+  copyWeeksCoverage,
 } from '@/server/actions/coverageWeekly'
 import { RoleRequirementsEditor, initialRoleRows, type RoleRow } from './RoleRequirementsEditor'
 
@@ -692,66 +692,149 @@ function MenuItem({ icon, label, desc, danger, onClick }: any) {
   )
 }
 
-// ─── Modal: copiar semanas (selección múltiple sobre calendario) ───────────────
-// Se seleccionan una o varias semanas ORIGEN (que tengan cobertura) y luego un
-// lunes DESTINO. Las semanas origen se pegan consecutivas desde el destino.
+// ─── Calendario mensual (dos meses lado a lado) para copiar semanas ────────────
+// Selección POR SEMANAS: al clicar cualquier día se marca su semana entera.
+const WEEKDAY_LABELS = ['L', 'M', 'X', 'J', 'V', 'S', 'D']
+const MONTH_NAMES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
+
+// Devuelve la matriz de semanas (cada una: 7 fechas ISO lun→dom) que cubren
+// visualmente el mes dado (incluye días de meses vecinos para cuadrar la rejilla).
+function monthWeeks(year: number, month: number): string[][] {
+  const first = new Date(Date.UTC(year, month, 1))
+  const dow = (first.getUTCDay() + 6) % 7
+  const gridStart = new Date(first)
+  gridStart.setUTCDate(gridStart.getUTCDate() - dow) // lunes de la 1ª semana visible
+  const weeks: string[][] = []
+  const cur = new Date(gridStart)
+  for (let w = 0; w < 6; w++) {
+    const week: string[] = []
+    for (let d = 0; d < 7; d++) {
+      week.push(cur.toISOString().slice(0, 10))
+      cur.setUTCDate(cur.getUTCDate() + 1)
+    }
+    weeks.push(week)
+    // parar si la siguiente semana ya no pertenece al mes
+    if (new Date(week[6] + 'T00:00:00Z').getUTCMonth() !== month && w >= 3) {
+      const nextMonday = new Date(week[6] + 'T00:00:00Z'); nextMonday.setUTCDate(nextMonday.getUTCDate() + 1)
+      if (nextMonday.getUTCMonth() !== month) break
+    }
+  }
+  return weeks
+}
+
+interface MonthCalProps {
+  year: number
+  month: number
+  // Estado por semana (clave = lunes ISO): 'source' | 'target' | null
+  weekState: (mondayISO: string) => 'source' | 'target' | null
+  onWeekClick: (mondayISO: string) => void
+  targetIndex?: (mondayISO: string) => number | null
+}
+
+function MonthCalendar({ year, month, weekState, onWeekClick, targetIndex }: MonthCalProps) {
+  const weeks = monthWeeks(year, month)
+  return (
+    <div className="flex-1 min-w-0">
+      <div className="text-center text-[13px] font-bold text-gray-800 mb-2 capitalize">{MONTH_NAMES[month]} {year}</div>
+      <div className="grid grid-cols-7 gap-0.5 mb-1">
+        {WEEKDAY_LABELS.map((d, i) => (
+          <div key={i} className="text-center text-[10px] font-semibold text-gray-400">{d}</div>
+        ))}
+      </div>
+      <div className="space-y-0.5">
+        {weeks.map((week, wi) => {
+          const monday = week[0]
+          const st = weekState(monday)
+          const tIdx = st === 'target' && targetIndex ? targetIndex(monday) : null
+          return (
+            <div
+              key={wi}
+              onClick={() => onWeekClick(monday)}
+              className={cn(
+                'grid grid-cols-7 gap-0.5 rounded-lg cursor-pointer transition-all py-0.5 relative',
+                st === 'source' && 'bg-indigo-100 ring-1 ring-indigo-300',
+                st === 'target' && 'bg-emerald-100 ring-1 ring-emerald-300',
+                !st && 'hover:bg-gray-50'
+              )}
+            >
+              {week.map(iso => {
+                const d = new Date(iso + 'T00:00:00Z')
+                const inMonth = d.getUTCMonth() === month
+                return (
+                  <div key={iso} className={cn(
+                    'text-center text-[11px] py-1 rounded',
+                    !inMonth && 'text-gray-300',
+                    inMonth && st === 'source' && 'text-indigo-700 font-semibold',
+                    inMonth && st === 'target' && 'text-emerald-700 font-semibold',
+                    inMonth && !st && 'text-gray-600'
+                  )}>
+                    {d.getUTCDate()}
+                  </div>
+                )
+              })}
+              {tIdx != null && (
+                <span className="absolute -right-1 -top-1 w-4 h-4 rounded-full bg-emerald-500 text-white text-[8px] font-bold flex items-center justify-center">{tIdx + 1}</span>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ─── Modal: copiar semanas (dos calendarios, selección visual por semanas) ─────
 function CopyWeeksModal({ weekStartISO, locationId, organizationId, dirty, onClose, onCopied }: any) {
   const [pending, setPending] = useState(false)
-  const [year, setYear] = useState<number>(new Date(weekStartISO).getUTCFullYear())
-  const [weeksWithCoverage, setWeeksWithCoverage] = useState<Set<string>>(new Set())
-  const [loading, setLoading] = useState(true)
+  const [phase, setPhase] = useState<'source' | 'target'>('source')
   const [selectedSources, setSelectedSources] = useState<string[]>([]) // lunes ISO
   const [target, setTarget] = useState<string | null>(null)            // lunes ISO destino
-  const [phase, setPhase] = useState<'source' | 'target'>('source')
 
-  useEffect(() => {
-    let alive = true
-    setLoading(true)
-    getWeeksWithCoverage(locationId, year)
-      .then((mondays: string[]) => { if (alive) { setWeeksWithCoverage(new Set(mondays)); setLoading(false) } })
-      .catch(() => { if (alive) setLoading(false) })
-    return () => { alive = false }
-  }, [locationId, year])
+  // Par de meses visibles (el izquierdo). El derecho es el siguiente.
+  const initial = new Date(weekStartISO + 'T00:00:00Z')
+  const [viewYear, setViewYear] = useState(initial.getUTCFullYear())
+  const [viewMonth, setViewMonth] = useState(initial.getUTCMonth())
 
-  // Lunes de todas las semanas ISO del año (para pintar la rejilla).
-  const weeks = useMemo(() => {
-    const first = new Date(Date.UTC(year, 0, 1))
-    const dow = (first.getUTCDay() + 6) % 7
-    const firstMonday = new Date(first)
-    firstMonday.setUTCDate(firstMonday.getUTCDate() - dow)
-    const out: string[] = []
-    const cur = new Date(firstMonday)
-    while (cur.getUTCFullYear() <= year) {
-      out.push(cur.toISOString().slice(0, 10))
-      cur.setUTCDate(cur.getUTCDate() + 7)
-      if (cur.getUTCFullYear() > year && (cur.getUTCMonth() > 0 || cur.getUTCDate() > 7)) break
-    }
-    return out
-  }, [year])
-
-  function toggleSource(monday: string) {
-    setSelectedSources(prev => prev.includes(monday) ? prev.filter(m => m !== monday) : [...prev, monday].sort())
+  function prevMonths() {
+    setViewMonth(m => { if (m === 0) { setViewYear(y => y - 1); return 11 } return m - 1 })
   }
+  function nextMonths() {
+    setViewMonth(m => { if (m === 11) { setViewYear(y => y + 1); return 0 } return m + 1 })
+  }
+  const rightMonth = viewMonth === 11 ? 0 : viewMonth + 1
+  const rightYear = viewMonth === 11 ? viewYear + 1 : viewYear
 
   const sortedSources = useMemo(() => [...selectedSources].sort(), [selectedSources])
 
-  // Semanas destino que se pintarán (consecutivas desde el target).
+  // Semanas destino (consecutivas desde el target, tantas como orígenes).
   const targetWeeks = useMemo(() => {
     if (!target || sortedSources.length === 0) return []
     const out: string[] = []
-    const cur = new Date(target + 'T00:00:00Z')
-    for (let i = 0; i < sortedSources.length; i++) {
-      out.push(cur.toISOString().slice(0, 10))
-      cur.setUTCDate(cur.getUTCDate() + 7)
-    }
+    let cur = target
+    for (let i = 0; i < sortedSources.length; i++) { out.push(cur); cur = addDaysISO(cur, 7) }
     return out
   }, [target, sortedSources])
+
+  function toggleSource(monday: string) {
+    setSelectedSources(prev => prev.includes(monday) ? prev.filter(m => m !== monday) : [...prev, monday])
+  }
+
+  function weekStateSource(monday: string): 'source' | 'target' | null {
+    return selectedSources.includes(monday) ? 'source' : null
+  }
+  function weekStateTarget(monday: string): 'source' | 'target' | null {
+    if (targetWeeks.includes(monday)) return 'target'
+    return null
+  }
+  function targetIndexOf(monday: string): number | null {
+    const i = targetWeeks.indexOf(monday)
+    return i >= 0 ? i : null
+  }
 
   function fmtWeek(monday: string): string {
     const d = new Date(monday + 'T00:00:00Z')
     const end = new Date(d); end.setUTCDate(end.getUTCDate() + 6)
-    const m = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
-    return `${d.getUTCDate()} ${m[d.getUTCMonth()]} – ${end.getUTCDate()} ${m[end.getUTCMonth()]}`
+    return `${d.getUTCDate()} ${MONTHS_ES[d.getUTCMonth()]} – ${end.getUTCDate()} ${MONTHS_ES[end.getUTCMonth()]}`
   }
 
   function handleCopy() {
@@ -771,16 +854,19 @@ function CopyWeeksModal({ weekStartISO, locationId, organizationId, dirty, onClo
     })()
   }
 
+  const activeWeekState = phase === 'source' ? weekStateSource : weekStateTarget
+  const onWeekClick = phase === 'source' ? toggleSource : (m: string) => setTarget(m)
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="absolute inset-0 bg-black/40 backdrop-blur-[3px]" />
-      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-[560px] max-h-[88vh] flex flex-col" onClick={e => e.stopPropagation()}>
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-[720px] max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="px-6 py-4 border-b border-gray-100 flex-shrink-0" style={{ background: 'linear-gradient(135deg,#eef2ff,#f5f3ff)' }}>
           <h3 className="text-[15px] font-bold text-gray-900">Copiar semanas</h3>
           <p className="text-[11px] text-gray-500 mt-0.5">
             {phase === 'source'
-              ? 'Selecciona una o varias semanas con cobertura para copiar.'
-              : 'Elige la semana destino. Se pegarán consecutivas desde ahí.'}
+              ? 'Haz clic en cualquier día para seleccionar su semana entera. Puedes elegir varias.'
+              : 'Elige la semana destino: se pegarán consecutivas a partir de ahí.'}
           </p>
         </div>
 
@@ -791,58 +877,39 @@ function CopyWeeksModal({ weekStartISO, locationId, organizationId, dirty, onClo
           </div>
         )}
 
-        {/* Navegador de año */}
-        <div className="flex items-center justify-center gap-4 px-6 py-3 flex-shrink-0">
-          <button onClick={() => setYear(y => y - 1)} className="p-1 rounded hover:bg-gray-100 text-gray-500"><ChevronLeft size={16} /></button>
-          <span className="text-[14px] font-bold text-gray-800">{year}</span>
-          <button onClick={() => setYear(y => y + 1)} className="p-1 rounded hover:bg-gray-100 text-gray-500"><ChevronRight size={16} /></button>
-        </div>
+        {/* Navegador + dos meses */}
+        <div className="px-6 py-4 overflow-y-auto flex-1">
+          <div className="flex items-center justify-between mb-3">
+            <button onClick={prevMonths} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500"><ChevronLeft size={16} /></button>
+            <span className={cn('text-[11px] font-semibold px-2.5 py-1 rounded-full',
+              phase === 'source' ? 'bg-indigo-100 text-indigo-600' : 'bg-emerald-100 text-emerald-600')}>
+              {phase === 'source' ? 'Seleccionando origen' : 'Seleccionando destino'}
+            </span>
+            <button onClick={nextMonths} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500"><ChevronRight size={16} /></button>
+          </div>
+          <div className="flex gap-6">
+            <MonthCalendar year={viewYear} month={viewMonth}
+              weekState={activeWeekState} onWeekClick={onWeekClick}
+              targetIndex={phase === 'target' ? targetIndexOf : undefined} />
+            <MonthCalendar year={rightYear} month={rightMonth}
+              weekState={activeWeekState} onWeekClick={onWeekClick}
+              targetIndex={phase === 'target' ? targetIndexOf : undefined} />
+          </div>
 
-        {/* Rejilla de semanas */}
-        <div className="px-6 pb-2 overflow-y-auto flex-1">
-          {loading ? (
-            <div className="flex justify-center py-8"><Loader2 size={20} className="animate-spin text-gray-300" /></div>
-          ) : (
-            <div className="grid grid-cols-2 gap-1.5">
-              {weeks.map(monday => {
-                const hasCoverage = weeksWithCoverage.has(monday)
-                const isSource = selectedSources.includes(monday)
-                const isTarget = targetWeeks.includes(monday)
-                const targetIdx = targetWeeks.indexOf(monday)
-                const selectable = phase === 'source' ? hasCoverage : true
-                return (
-                  <button
-                    key={monday}
-                    disabled={!selectable}
-                    onClick={() => phase === 'source' ? toggleSource(monday) : setTarget(monday)}
-                    className={cn(
-                      'flex items-center justify-between px-3 py-2 rounded-xl border text-left transition-all',
-                      isSource ? 'border-indigo-400 bg-indigo-50' :
-                      isTarget ? 'border-emerald-400 bg-emerald-50' :
-                      selectable ? 'border-gray-200 hover:border-gray-300' : 'border-gray-100 bg-gray-50/50 opacity-40 cursor-not-allowed'
-                    )}
-                  >
-                    <span className={cn('text-[12px] font-medium', isSource ? 'text-indigo-700' : isTarget ? 'text-emerald-700' : 'text-gray-600')}>
-                      {fmtWeek(monday)}
-                    </span>
-                    {isTarget
-                      ? <span className="text-[9px] font-bold text-emerald-600">#{targetIdx + 1}</span>
-                      : hasCoverage && phase === 'source'
-                      ? <span className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
-                      : null}
-                  </button>
-                )
-              })}
+          {/* Resumen de selección */}
+          {sortedSources.length > 0 && (
+            <div className="mt-4 p-3 rounded-xl bg-gray-50 border border-gray-100">
+              <div className="text-[11px] font-semibold text-gray-500 mb-1.5">
+                {sortedSources.length} semana(s) seleccionada(s){phase === 'target' && target ? ` → destino desde ${fmtWeek(target)}` : ''}
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {sortedSources.map(m => (
+                  <span key={m} className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-600 font-medium">{fmtWeek(m)}</span>
+                ))}
+              </div>
             </div>
           )}
         </div>
-
-        {/* Resumen */}
-        {phase === 'target' && sortedSources.length > 0 && (
-          <div className="px-6 py-2 text-[11px] text-gray-500 flex-shrink-0">
-            Copiando <strong>{sortedSources.length}</strong> semana(s){target ? <> → destino desde <strong>{fmtWeek(target)}</strong></> : null}
-          </div>
-        )}
 
         <div className="flex justify-between items-center px-6 py-4 border-t border-gray-100 bg-gray-50/50 flex-shrink-0">
           <button onClick={onClose} className="px-4 py-2 rounded-xl text-[13px] text-gray-500 hover:bg-gray-100 transition-colors">Cancelar</button>
