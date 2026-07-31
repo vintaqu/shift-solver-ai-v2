@@ -33,6 +33,17 @@ function nextSlot(time: string): string {
 }
 
 // Parte un rango horario en franjas de 30 min. "00:00" de fin = medianoche siguiente.
+// Opciones de hora en pasos de 30 min: "00:00", "00:30", ... "23:30".
+// `includeMidnightEnd` añade "00:00" al final (medianoche del día siguiente) para el campo Fin.
+function halfHourOptions(includeMidnightEnd = false): string[] {
+  const out: string[] = []
+  for (let m = 0; m < 24 * 60; m += 30) {
+    out.push(`${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`)
+  }
+  if (includeMidnightEnd) out.push('00:00') // fin = medianoche
+  return out
+}
+
 function splitIntoHalfHours(startTime: string, endTime: string): Array<{ start: string; end: string }> {
   const [sh, sm] = startTime.split(':').map(Number)
   const [eh, em] = endTime === '00:00' ? [24, 0] : endTime.split(':').map(Number)
@@ -631,11 +642,26 @@ function SlotModal({ slot, defaultDate, defaultTime, weekDates, roles, onClose, 
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <div className="text-[11px] text-gray-400 mb-1">Inicio</div>
-                <input type="time" value={form.startTime} onChange={e => setForm(f => ({ ...f, startTime: e.target.value, endTime: nextSlot(e.target.value) }))} className={inputCls()} />
+                <select
+                  value={form.startTime}
+                  onChange={e => setForm(f => ({ ...f, startTime: e.target.value, endTime: nextSlot(e.target.value) }))}
+                  className={cn(inputCls(), 'cursor-pointer')}
+                >
+                  {halfHourOptions().map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
               </div>
               <div>
                 <div className="text-[11px] text-gray-400 mb-1">Fin</div>
-                <input type="time" value={form.endTime} onChange={e => setForm(f => ({ ...f, endTime: e.target.value }))} className={inputCls()} />
+                <select
+                  value={form.endTime}
+                  onChange={e => setForm(f => ({ ...f, endTime: e.target.value }))}
+                  className={cn(inputCls(), 'cursor-pointer')}
+                >
+                  {halfHourOptions(true)
+                    // Solo horas de fin posteriores al inicio (00:00 final = medianoche, siempre válido).
+                    .filter(t => t === '00:00' || t > form.startTime)
+                    .map(t => <option key={t} value={t}>{t === '00:00' ? '00:00 (medianoche)' : t}</option>)}
+                </select>
               </div>
             </div>
           </Field>
