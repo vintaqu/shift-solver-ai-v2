@@ -13,7 +13,7 @@ import {
   saveWeekCoverage,
   copyWeeksCoverage,
 } from '@/server/actions/coverageWeekly'
-import { RoleRequirementsEditor, initialRoleRows, type RoleRow } from './RoleRequirementsEditor'
+import { RoleRequirementsEditor, initialRoleRows, sortRoles, type RoleRow } from './RoleRequirementsEditor'
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 const DAYS_SHORT = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
@@ -194,6 +194,22 @@ export function CoverageWeeklyClient({
     for (const s of normalizedSlots) map.set(`${s.date}|${s.startTime}`, s)
     return map
   }, [normalizedSlots])
+
+  // Color actual de cada rol (por id). El render de las barras usa SIEMPRE este
+  // mapa en vez del color embebido en el slot, de modo que si se cambia el color
+  // de un rol en configuración, las barras y la leyenda se actualizan solas.
+  const roleColorById = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const r of roles) m.set(r.id, r.color)
+    return m
+  }, [roles])
+  const roleColor = (rr: any) => roleColorById.get(rr.laborRoleId) ?? rr.laborRole?.color ?? '#9ca3af'
+  const roleNameById = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const r of roles) m.set(r.id, r.name)
+    return m
+  }, [roles])
+  const roleName = (rr: any) => roleNameById.get(rr.laborRoleId) ?? rr.laborRole?.name ?? 'Rol'
 
   // ── Mutaciones del borrador (solo estado local; nada al backend) ──────────
 
@@ -376,6 +392,19 @@ export function CoverageWeeklyClient({
         <span><strong className="text-red-500 text-[14px]">{kpis.required}</strong> <span className="text-gray-400">slots obligatorios</span></span>
       </div>
 
+      {/* ── Glosario de roles (colores) ── */}
+      {roles.length > 0 && (
+        <div className="flex-shrink-0 flex items-center gap-3 px-6 py-2 bg-white border-b border-gray-100 flex-wrap">
+          <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Roles</span>
+          {sortRoles(roles).map((r: any) => (
+            <span key={r.id} className="flex items-center gap-1.5" title={r.name}>
+              <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: r.color }} />
+              <span className="text-[11px] text-gray-600 font-medium">{r.name}</span>
+            </span>
+          ))}
+        </div>
+      )}
+
       {/* ── Grid ── */}
       <div className="flex-1 overflow-auto px-5 py-4">
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden min-w-[900px]">
@@ -422,26 +451,35 @@ export function CoverageWeeklyClient({
                           {slot.idealWorkers > slot.minWorkers && (
                             <span className="text-[12px] font-semibold" style={{ color: colors!.text, opacity: 0.7 }}>/{slot.idealWorkers}</span>
                           )}
+                          {slot.notes && <span className="text-[9px] text-gray-400 ml-auto" title={slot.notes}>📝</span>}
                         </div>
-                        {((slot.roleRequirements && slot.roleRequirements.length > 0) || slot.laborRole || slot.notes) && (
-                          <div className="pl-1.5 mt-0.5 flex items-center gap-1 flex-wrap">
-                            {slot.roleRequirements && slot.roleRequirements.length > 0 ? (
-                              slot.roleRequirements.map((rr: any) => (
-                                <span key={rr.laborRoleId ?? rr.id}
-                                  className="text-[8px] font-semibold px-1 rounded text-white leading-tight"
-                                  style={{ backgroundColor: rr.laborRole?.color ?? '#9ca3af' }}
-                                  title={`${rr.laborRole?.name ?? 'Rol'}: mín ${rr.minWorkers} / ideal ${rr.idealWorkers}`}>
-                                  {(rr.laborRole?.name?.split(' ')[0] ?? '?')} {rr.minWorkers}
-                                </span>
-                              ))
-                            ) : slot.laborRole ? (
-                              <span className="text-[8px] font-semibold px-1 rounded text-white leading-tight" style={{ backgroundColor: slot.laborRole.color }}>
-                                {slot.laborRole.name.split(' ')[0]}
-                              </span>
-                            ) : null}
-                            {slot.notes && <span className="text-[8px] text-gray-500" title={slot.notes}>📝</span>}
+
+                        {/* Barra segmentada por rol: anchura ∝ mínimo de cada rol, color del rol. */}
+                        {slot.roleRequirements && slot.roleRequirements.length > 0 ? (
+                          <div className="pl-1.5 mt-1 flex h-[14px] rounded overflow-hidden">
+                            {(() => {
+                              const reqs = slot.roleRequirements.filter((rr: any) => (rr.minWorkers ?? 0) > 0)
+                              const totalMin = reqs.reduce((a: number, rr: any) => a + (rr.minWorkers ?? 0), 0) || 1
+                              return reqs.map((rr: any) => {
+                                const pct = (rr.minWorkers / totalMin) * 100
+                                return (
+                                  <div key={rr.laborRoleId ?? rr.id}
+                                    className="flex items-center justify-center text-white text-[9px] font-bold leading-none"
+                                    style={{ width: `${pct}%`, backgroundColor: roleColor(rr) }}
+                                    title={`${roleName(rr)}: mín ${rr.minWorkers} / ideal ${rr.idealWorkers}`}>
+                                    {pct > 14 ? rr.minWorkers : ''}
+                                  </div>
+                                )
+                              })
+                            })()}
                           </div>
-                        )}
+                        ) : slot.laborRole ? (
+                          <div className="pl-1.5 mt-1 flex h-[14px] rounded overflow-hidden">
+                            <div className="flex-1 flex items-center justify-center text-white text-[9px] font-bold"
+                              style={{ backgroundColor: slot.laborRole.color }}
+                              title={slot.laborRole.name}>{slot.minWorkers}</div>
+                          </div>
+                        ) : null}
                       </div>
                     ) : (
                       <div className="w-full h-full min-h-[38px] rounded-lg flex items-center justify-center opacity-0 group-hover/cell:opacity-100 transition-opacity">
