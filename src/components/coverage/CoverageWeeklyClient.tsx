@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition, useMemo, useEffect } from 'react'
+import { useState, useTransition, useMemo, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
@@ -66,6 +66,61 @@ function demandColor(min: number): { bg: string; text: string; border: string; b
   if (min === 4) return { bg: '#fff7ed', text: '#9a3412', border: '#fed7aa', bar: '#f97316' }
   return { bg: '#fef2f2', text: '#991b1b', border: '#fecaca', bar: '#ef4444' }
 }
+
+// Selector de hora propio — sin <select> nativo para evitar que re-renders
+// del componente padre cierren el desplegable antes de que el usuario elija.
+function TimeSelect({ value, options, onChange, labelFor }: {
+  value: string
+  options: string[]
+  onChange: (v: string) => void
+  labelFor?: (v: string) => string
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  function handleBlur(e: React.FocusEvent<HTMLDivElement>) {
+    if (!ref.current?.contains(e.relatedTarget as Node)) setOpen(false)
+  }
+
+  function pick(v: string) {
+    onChange(v)
+    setOpen(false)
+  }
+
+  return (
+    <div ref={ref} tabIndex={-1} onBlur={handleBlur} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between px-3 py-2 rounded-xl border border-gray-200 bg-gray-50 text-[13px] font-mono font-medium text-gray-800 hover:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-300 transition-colors"
+      >
+        {labelFor ? labelFor(value) : value}
+        <svg className={cn("w-4 h-4 text-gray-400 transition-transform", open && "rotate-180")} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="absolute z-50 mt-1 w-full bg-white rounded-xl shadow-lg border border-gray-200 max-h-52 overflow-y-auto py-1">
+          {options.map(t => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => pick(t)}
+              className={cn(
+                "w-full text-left px-3 py-1.5 text-[13px] font-mono hover:bg-indigo-50 hover:text-indigo-700 transition-colors",
+                t === value && "bg-indigo-100 text-indigo-700 font-bold"
+              )}
+            >
+              {labelFor ? labelFor(t) : t}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 
 function inputCls(err = false) {
   return cn(
@@ -646,26 +701,20 @@ function SlotModal({ slot, defaultDate, defaultTime, weekDates, roles, onClose, 
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <div className="text-[11px] text-gray-400 mb-1">Inicio</div>
-                <select
+                <TimeSelect
                   value={form.startTime}
-                  onChange={e => setForm(f => ({ ...f, startTime: e.target.value, endTime: nextSlot(e.target.value) }))}
-                  className={cn(inputCls(), 'cursor-pointer')}
-                >
-                  {halfHourOptions().map(t => <option key={t} value={t}>{t}</option>)}
-                </select>
+                  onChange={v => setForm(f => ({ ...f, startTime: v, endTime: nextSlot(v) }))}
+                  options={halfHourOptions()}
+                />
               </div>
               <div>
                 <div className="text-[11px] text-gray-400 mb-1">Fin</div>
-                <select
+                <TimeSelect
                   value={form.endTime}
-                  onChange={e => setForm(f => ({ ...f, endTime: e.target.value }))}
-                  className={cn(inputCls(), 'cursor-pointer')}
-                >
-                  {halfHourOptions(true)
-                    // Solo horas de fin posteriores al inicio (00:00 final = medianoche, siempre válido).
-                    .filter(t => t === '00:00' || t > form.startTime)
-                    .map(t => <option key={t} value={t}>{t === '00:00' ? '00:00 (medianoche)' : t}</option>)}
-                </select>
+                  onChange={v => setForm(f => ({ ...f, endTime: v }))}
+                  options={halfHourOptions(true).filter(t => t === '00:00' || t > form.startTime)}
+                  labelFor={t => t === '00:00' ? '00:00 (medianoche)' : t}
+                />
               </div>
             </div>
           </Field>
