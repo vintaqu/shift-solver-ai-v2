@@ -180,23 +180,29 @@ export function CoverageWeeklyClient({
 
   const weekDates = useMemo(() => Array.from({ length: 7 }, (_, i) => addDaysISO(weekStartISO, i)), [weekStartISO])
 
-  // Normalizar fechas de los slots del servidor (llegan como ISO datetime completo)
-  const serverSlots = useMemo(() => initialSlots.map(s => ({
+  // ── Borrador local ──────────────────────────────────────────────────────
+  // `serverVersion` sube explícitamente solo después de guardar con éxito.
+  // Así evitamos re-renders espurios por el array nuevo que llega en cada
+  // render del server component (que cerrarían los <select> abiertos).
+  const [serverVersion, setServerVersion] = useState(0)
+
+  const serverSlots = useMemo(() => initialSlots.map((s: any) => ({
     ...s,
     date: (s.date as any as string).slice(0, 10),
-  })), [initialSlots])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  })), [weekStartISO, serverVersion])
 
-  // ── Borrador local ──────────────────────────────────────────────────────
-  // Toda la edición ocurre en el front sobre `draftSlots`. No se persiste
-  // hasta pulsar "Guardar". Al cambiar de semana (nuevas props) se recarga.
   const [draftSlots, setDraftSlots] = useState<Slot[]>(serverSlots)
   const [dirty, setDirty] = useState(false)
 
   useEffect(() => {
-    // Nueva semana cargada desde el servidor → resetear borrador.
-    setDraftSlots(serverSlots)
+    setDraftSlots(initialSlots.map((s: any) => ({
+      ...s,
+      date: (s.date as any as string).slice(0, 10),
+    })))
     setDirty(false)
-  }, [serverSlots])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [weekStartISO, serverVersion])
 
   const normalizedSlots = draftSlots
 
@@ -301,6 +307,7 @@ export function CoverageWeeklyClient({
         toast.success(`Semana guardada · ${r.saved} slots ✓`)
         setDirty(false)
         router.refresh()
+        setServerVersion(v => v + 1)
       } catch (e: any) { toast.error(e.message) }
     })
   }
@@ -475,10 +482,12 @@ export function CoverageWeeklyClient({
                                 const pct = (rr.minWorkers / totalMin) * 100
                                 return (
                                   <div key={rr.laborRoleId ?? rr.id}
-                                    className="flex items-center justify-center text-white text-[9px] font-bold leading-none"
-                                    style={{ width: `${pct}%`, backgroundColor: roleColor(rr) }}
-                                    title={`${roleName(rr)}: mín ${rr.minWorkers} / ideal ${rr.idealWorkers}`}>
+                                    className="relative group/seg flex items-center justify-center text-white text-[9px] font-bold leading-none"
+                                    style={{ width: `${pct}%`, backgroundColor: roleColor(rr) }}>
                                     {pct > 14 ? rr.minWorkers : ''}
+                                    <div className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 rounded bg-gray-900 text-white text-[10px] whitespace-nowrap opacity-0 group-hover/seg:opacity-100 transition-opacity z-50">
+                                      {roleName(rr)}: mín {rr.minWorkers} / ideal {rr.idealWorkers}
+                                    </div>
                                   </div>
                                 )
                               })
