@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition, useMemo, useRef, useEffect } from 'react'
+import { useState, useTransition, useMemo, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
@@ -168,15 +168,9 @@ export function CoverageWeeklyClient({
   const [showClearConfirm, setShowClearConfirm] = useState(false)
   const [showCopyWeeks, setShowCopyWeeks] = useState(false)
   const [showGearMenu, setShowGearMenu] = useState(false)
-  const gearRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    function handler(e: MouseEvent) {
-      if (gearRef.current && !gearRef.current.contains(e.target as Node)) setShowGearMenu(false)
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [])
+  // El menú del engranaje se cierra con onBlur del propio botón/menú —
+  // sin listener global que provoque re-renders al hacer click en el modal.
 
   const weekDates = useMemo(() => Array.from({ length: 7 }, (_, i) => addDaysISO(weekStartISO, i)), [weekStartISO])
 
@@ -385,7 +379,8 @@ export function CoverageWeeklyClient({
           </button>
 
           {/* ── Menú de acciones (engranaje) ── */}
-          <div className="relative" ref={gearRef}>
+          <div className="relative" tabIndex={-1}
+            onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setShowGearMenu(false) }}>
             <button onClick={() => setShowGearMenu(v => !v)}
               className={cn('w-9 h-9 rounded-xl border flex items-center justify-center transition-colors',
                 showGearMenu ? 'border-indigo-300 bg-indigo-50 text-indigo-600' : 'border-gray-200 text-gray-500 hover:bg-gray-50')}>
