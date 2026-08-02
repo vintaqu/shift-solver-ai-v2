@@ -6,14 +6,14 @@ import { toast } from 'sonner'
 import {
   ArrowLeft, User, FileText, Shield, Clock, Calendar,
   AlertTriangle, Pencil, Plus, Trash2, X, Loader2,
-  CheckCircle, AlertCircle, ToggleLeft, ToggleRight,
+  CheckCircle, AlertCircle,
   ChevronDown, Lock, Sun, Moon, Repeat
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { employeeColor, primaryRoleOf } from '@/lib/employee-color'
 import {
   upsertEmployee, upsertContract, setEmployeeSkills,
-  upsertAvailability, deleteAvailability, toggleEmployeeActive
+  upsertAvailability, deleteAvailability, setEmployeeStatus
 } from '@/server/actions/employees'
 import { updateEmployeeVacationConfig } from '@/server/actions/absences'
 import { setEmployeePin, removeEmployeePin, getEmployeeLoginLink } from '@/server/actions/auth'
@@ -106,7 +106,8 @@ export function EmployeeDetailClient({ employee: emp, skills: allSkills, roles: 
           <div className="flex-1">
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-[20px] font-bold text-gray-900">{emp.firstName} {emp.lastName}</h1>
-              {!emp.isActive && <span className="text-[11px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-semibold">Inactivo</span>}
+              {(emp as any).status === 'INACTIVE' && <span className="text-[11px] bg-amber-100 text-amber-600 px-2 py-0.5 rounded-full font-semibold">Inactivo</span>}
+              {(emp as any).status === 'ARCHIVED' && <span className="text-[11px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-semibold">Archivado</span>}
               {mainRoleLevel && (
                 <span className="text-[11px] text-white font-semibold px-2.5 py-0.5 rounded-full"
                   style={{ backgroundColor: ROLE_COLORS[mainRoleLevel] }}>
@@ -123,23 +124,16 @@ export function EmployeeDetailClient({ employee: emp, skills: allSkills, roles: 
 
           {/* Acciones header */}
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
+            <StatusSelector
+              currentStatus={(emp as any).status ?? 'ACTIVE'}
+              onSelect={async (s: string) => {
                 startTransition(async () => {
-                  await toggleEmployeeActive(emp.id)
-                  toast.success(emp.isActive ? 'Empleado desactivado' : 'Empleado reactivado')
+                  await setEmployeeStatus(emp.id, s as any)
+                  toast.success(`Estado cambiado a ${s === 'ACTIVE' ? 'Activo' : s === 'INACTIVE' ? 'Inactivo' : 'Archivado'}`)
                   router.refresh()
                 })
               }}
-              className={cn(
-                'flex items-center gap-1.5 px-3 py-2 rounded-xl text-[12px] font-medium border transition-colors',
-                emp.isActive
-                  ? 'border-red-200 text-red-600 hover:bg-red-50'
-                  : 'border-emerald-200 text-emerald-600 hover:bg-emerald-50'
-              )}
-            >
-              {emp.isActive ? <><ToggleRight size={14} /> Desactivar</> : <><ToggleLeft size={14} /> Activar</>}
-            </button>
+            />
           </div>
         </div>
 
@@ -177,7 +171,7 @@ export function EmployeeDetailClient({ employee: emp, skills: allSkills, roles: 
                 { label: 'Email', value: emp.email || '—' },
                 { label: 'Teléfono', value: emp.phone || '—' },
                 { label: 'Fecha de alta', value: emp.hireDate ? new Date(emp.hireDate).toLocaleDateString('es-ES') : '—' },
-                { label: 'Estado', value: emp.isActive ? '✅ Activo' : '❌ Inactivo' },
+                { label: 'Estado', value: (emp as any).status === 'ACTIVE' ? '✅ Activo' : (emp as any).status === 'INACTIVE' ? '⏸️ Inactivo' : '🗄️ Archivado' },
               ]} />
               {emp.notes && (
                 <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-xl text-[12px] text-amber-800">
@@ -1423,6 +1417,56 @@ function ModalFooter({ onClose, onSave, isPending, saveLabel = 'Guardar cambios'
         {isPending ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
         {saveLabel}
       </button>
+    </div>
+  )
+}
+
+// ─── Selector de estado (Activo / Inactivo / Archivado) ───────────────────────
+const STATUS_CONFIG = {
+  ACTIVE:   { label: 'Activo',    color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200', dot: 'bg-emerald-500' },
+  INACTIVE: { label: 'Inactivo',  color: 'text-amber-600',   bg: 'bg-amber-50',   border: 'border-amber-200',   dot: 'bg-amber-400'  },
+  ARCHIVED: { label: 'Archivado', color: 'text-gray-500',    bg: 'bg-gray-50',    border: 'border-gray-200',    dot: 'bg-gray-400'   },
+}
+
+function StatusSelector({ currentStatus, onSelect }: { currentStatus: string; onSelect: (s: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const cfg = STATUS_CONFIG[currentStatus as keyof typeof STATUS_CONFIG] ?? STATUS_CONFIG.ACTIVE
+  const options = ['ACTIVE', 'INACTIVE', 'ARCHIVED'].filter(s => s !== currentStatus)
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className={cn(
+          'flex items-center gap-1.5 px-3 py-2 rounded-xl text-[12px] font-semibold border transition-colors',
+          cfg.bg, cfg.border, cfg.color
+        )}
+      >
+        <span className={cn('w-2 h-2 rounded-full', cfg.dot)} />
+        {cfg.label}
+        <ChevronDown size={12} className={cn('transition-transform', open && 'rotate-180')} />
+      </button>
+
+      {open && (
+        <div className="absolute right-0 mt-1 w-40 bg-white rounded-xl border border-gray-200 shadow-lg py-1 z-20">
+          {options.map(s => {
+            const c = STATUS_CONFIG[s as keyof typeof STATUS_CONFIG]
+            return (
+              <button
+                key={s}
+                onClick={() => { setOpen(false); onSelect(s) }}
+                className={cn(
+                  'w-full flex items-center gap-2 px-3 py-2 text-left text-[12px] font-medium hover:bg-gray-50 transition-colors',
+                  c.color
+                )}
+              >
+                <span className={cn('w-2 h-2 rounded-full flex-shrink-0', c.dot)} />
+                {c.label}
+              </button>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

@@ -36,7 +36,7 @@ export default async function PlanningWeekPage({ params }: { params: { id: strin
 
   // Todos los empleados activos de la org
   const employees = await prisma.employee.findMany({
-    where: { organizationId: period.organizationId, isActive: true },
+    where: { organizationId: period.organizationId, status: 'ACTIVE' as any },
     include: {
       contracts: { where: { isActive: true }, take: 1 },
       skills: { include: { skill: true, laborRole: true } },

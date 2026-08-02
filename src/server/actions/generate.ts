@@ -60,7 +60,7 @@ export async function generateSchedule(
 
   // 2. Cargar empleados activos con todo lo necesario
   const employees = await prisma.employee.findMany({
-    where: { organizationId: period.organizationId, isActive: true },
+    where: { organizationId: period.organizationId, status: 'ACTIVE' as any },
     include: {
       contracts: { where: { isActive: true }, orderBy: { startDate: 'desc' }, take: 1 },
       skills: { include: { skill: true, laborRole: true } },

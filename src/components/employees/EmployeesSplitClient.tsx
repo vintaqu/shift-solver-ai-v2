@@ -9,7 +9,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { EmployeeDetailClient } from './EmployeeDetailClient'
-import { upsertEmployee, duplicateEmployee } from '@/server/actions/employees'
+import { upsertEmployee, duplicateEmployee, setEmployeeStatus } from '@/server/actions/employees'
 import { employeeColor } from '@/lib/employee-color'
 
 const ROLE_COLORS: Record<string, string> = {
@@ -41,7 +41,7 @@ export function EmployeesSplitClient({ employees: initial, skills, roles, legalF
   const [selectedId, setSelectedId] = useState<string | null>(initial[0]?.id ?? null)
   const [search, setSearch] = useState('')
   const [filterRole, setFilterRole] = useState('all')
-  const [filterStatus, setFilterStatus] = useState<'active' | 'inactive' | 'all'>('active')
+  const [filterStatus, setFilterStatus] = useState<'active' | 'inactive' | 'archived' | 'all'>('active')
   const [showCreate, setShowCreate] = useState(false)
   const [addMenuOpen, setAddMenuOpen] = useState(false)
   const [duplicateMode, setDuplicateMode] = useState(false) // elegir empleado a copiar
@@ -64,17 +64,21 @@ export function EmployeesSplitClient({ employees: initial, skills, roles, legalF
     const matchSearch = `${e.firstName} ${e.lastName}`.toLowerCase().includes(search.toLowerCase())
     const roleLevel = e.skills?.[0]?.laborRole?.level ?? ''
     const matchRole = filterRole === 'all' || roleLevel === filterRole
-    const matchStatus = filterStatus === 'all' || (filterStatus === 'active' ? e.isActive : !e.isActive)
+    const matchStatus =
+      filterStatus === 'all' ||
+      (filterStatus === 'active'   && (e as any).status === 'ACTIVE') ||
+      (filterStatus === 'inactive' && (e as any).status === 'INACTIVE') ||
+      (filterStatus === 'archived' && (e as any).status === 'ARCHIVED')
     return matchSearch && matchRole && matchStatus
   }), [employees, search, filterRole, filterStatus])
 
   const selectedEmployee = employees.find(e => e.id === selectedId) ?? null
 
   // KPIs
-  const active = employees.filter(e => e.isActive).length
-  const fullTime = employees.filter(e => e.isActive && (e.contracts?.[0]?.contractType === 'FULL_TIME')).length
-  const partTime = employees.filter(e => e.isActive && (e.contracts?.[0]?.contractType === 'PART_TIME')).length
-  const totalH = employees.filter(e => e.isActive).reduce((s, e) => s + (e.contracts?.[0]?.weeklyHours ?? 0), 0)
+  const active = employees.filter(e => (e as any).status === 'ACTIVE').length
+  const fullTime = employees.filter(e => (e as any).status === 'ACTIVE' && (e.contracts?.[0]?.contractType === 'FULL_TIME')).length
+  const partTime = employees.filter(e => (e as any).status === 'ACTIVE' && (e.contracts?.[0]?.contractType === 'PART_TIME')).length
+  const totalH = employees.filter(e => (e as any).status === 'ACTIVE').reduce((s, e) => s + (e.contracts?.[0]?.weeklyHours ?? 0), 0)
 
   return (
     <div className="flex h-[calc(100vh-52px)] overflow-hidden bg-[#F7F8FA]">
@@ -136,9 +140,10 @@ export function EmployeesSplitClient({ employees: initial, skills, roles, legalF
           {/* Filtros */}
           <div className="flex gap-1 mt-2">
             {[
-              { key: 'active', label: 'Activos' },
+              { key: 'active',   label: 'Activos' },
               { key: 'inactive', label: 'Inactivos' },
-              { key: 'all', label: 'Todos' },
+              { key: 'archived', label: 'Archivados' },
+              { key: 'all',      label: 'Todos' },
             ].map(f => (
               <button
                 key={f.key}
@@ -203,7 +208,8 @@ export function EmployeesSplitClient({ employees: initial, skills, roles, legalF
                         : isSelected
                         ? 'bg-indigo-50 border-l-indigo-600'
                         : 'border-l-transparent hover:bg-gray-50',
-                      !emp.isActive && 'opacity-50'
+                      !emp.isActive && 'opacity-50',
+                      (emp as any).status === 'ARCHIVED' && 'opacity-40'
                     )}
                   >
                     {/* Avatar */}
@@ -220,8 +226,11 @@ export function EmployeesSplitClient({ employees: initial, skills, roles, legalF
                         <span className={cn('text-[13px] font-medium truncate', isSelected ? 'text-indigo-700' : 'text-gray-800')}>
                           {emp.firstName} {emp.lastName}
                         </span>
-                        {!emp.isActive && (
-                          <span className="text-[9px] text-red-400 flex-shrink-0">Inactivo</span>
+                        {(emp as any).status === 'INACTIVE' && (
+                          <span className="text-[9px] font-medium text-amber-500 flex-shrink-0">Inactivo</span>
+                        )}
+                        {(emp as any).status === 'ARCHIVED' && (
+                          <span className="text-[9px] font-medium text-gray-400 flex-shrink-0">Archivado</span>
                         )}
                       </div>
                       <div className="flex items-center gap-2 mt-0.5">

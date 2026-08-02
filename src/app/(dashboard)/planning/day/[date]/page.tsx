@@ -50,7 +50,7 @@ export default async function DayPlanningPage({ params }: { params: { date: stri
 
   // Empleados activos (mismo orden que el planificador semanal)
   const employees = await prisma.employee.findMany({
-    where: { organizationId, isActive: true },
+    where: { organizationId, status: 'ACTIVE' as any },
     include: {
       contracts: { where: { isActive: true }, take: 1 },
       skills: { include: { skill: true, laborRole: true } },

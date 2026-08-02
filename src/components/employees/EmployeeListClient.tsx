@@ -9,7 +9,7 @@ import {
   AlertCircle, CheckCircle, Info
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { upsertEmployee, toggleEmployeeActive, duplicateEmployee } from '@/server/actions/employees'
+import { upsertEmployee, setEmployeeStatus, duplicateEmployee } from '@/server/actions/employees'
 import { employeeColor } from '@/lib/employee-color'
 
 const ROLE_LABELS: Record<string, string> = {
@@ -56,13 +56,13 @@ export function EmployeeListClient({ employees: initial, skills, roles, organiza
     const matchSearch = `${e.firstName} ${e.lastName} ${e.email || ''}`.toLowerCase().includes(search.toLowerCase())
     const empRole = e.skills?.[0]?.laborRole?.level || ''
     const matchRole = filterRole === 'all' || empRole === filterRole
-    const matchStatus = filterStatus === 'all' || (filterStatus === 'active' ? e.isActive : !e.isActive)
+    const matchStatus = filterStatus === 'all' || (filterStatus === 'active' ? (e as any).status === 'ACTIVE' : (e as any).status !== 'ACTIVE')
     return matchSearch && matchRole && matchStatus
   })
 
   const stats = {
     total: initial.length,
-    active: initial.filter(e => e.isActive).length,
+    active: initial.filter(e => (e as any).status === 'ACTIVE').length,
     fullTime: initial.filter(e => e.contracts?.[0]?.contractType === 'FULL_TIME').length,
     totalWeeklyHours: initial.reduce((acc, e) => acc + (e.contracts?.[0]?.weeklyHours || 0), 0),
   }
@@ -162,7 +162,7 @@ export function EmployeeListClient({ employees: initial, skills, roles, organiza
                   key={emp.id}
                   className={cn(
                     'bg-white border rounded-2xl p-4 flex items-center gap-4 cursor-pointer hover:shadow-md hover:border-indigo-200 transition-all group',
-                    !emp.isActive && 'opacity-60'
+                    (emp as any).status !== 'ACTIVE' && 'opacity-60'
                   )}
                   onClick={() => router.push(`/employees/${emp.id}`)}
                 >
@@ -180,8 +180,11 @@ export function EmployeeListClient({ employees: initial, skills, roles, organiza
                       <span className="text-[14px] font-bold text-gray-900">
                         {emp.firstName} {emp.lastName}
                       </span>
-                      {!emp.isActive && (
-                        <span className="text-[10px] font-semibold bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Inactivo</span>
+                      {(emp as any).status === 'INACTIVE' && (
+                        <span className="text-[10px] font-semibold bg-amber-100 text-amber-600 px-2 py-0.5 rounded-full">Inactivo</span>
+                      )}
+                      {(emp as any).status === 'ARCHIVED' && (
+                        <span className="text-[10px] font-semibold bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Archivado</span>
                       )}
                       {mainRole && (
                         <span

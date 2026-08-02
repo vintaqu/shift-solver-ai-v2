@@ -87,7 +87,11 @@ enum RuleSeverity {
   BLOCKING
 }
 
-
+enum EmployeeStatus {
+  ACTIVE    // aparece en solver y cuadrante
+  INACTIVE  // excluido de todo, visible en gestión
+  ARCHIVED  // cajón de sastre, solo visible con filtro especial
+}
 
 enum ClockStatus {
   PENDING
@@ -221,7 +225,7 @@ model Employee {
   email          String?
   phone          String?
   color          String   @default("#6366f1") // color en cuadrante
-  isActive       Boolean  @default(true)
+  status         EmployeeStatus @default(ACTIVE)
   hireDate       DateTime?
   notes                String?
   vacationDaysType     String   @default("NATURALES")
@@ -250,7 +254,7 @@ model Employee {
 
   @@index([organizationId])
   @@index([locationId])
-  @@index([organizationId, isActive])
+  @@index([organizationId, status])
 }
 
 model EmployeeContract {
