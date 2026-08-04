@@ -34,7 +34,7 @@ export async function getAdminDashboardData() {
     prisma.organization.count(),  // todos activos por ahora
     prisma.user.count(),
     prisma.employee.count(),
-    prisma.employee.count({ where: { isActive: true } }),
+    prisma.employee.count({ where: { status: 'ACTIVE' as any } }),
     prisma.planningPeriod.count(),
     prisma.planningPeriod.count({ where: { weekStart: { gte: weekStart, lte: weekEnd } } }),
     prisma.planningPeriod.count({ where: { weekStart: { gte: monthStart } } }),

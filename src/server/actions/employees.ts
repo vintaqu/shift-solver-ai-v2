@@ -17,6 +17,7 @@ export async function upsertEmployee(data: {
   hireDate?: string
   notes?: string
   isActive?: boolean
+  status?: 'ACTIVE' | 'INACTIVE' | 'ARCHIVED'
 }) {
   const payload = {
     organizationId: data.organizationId,
@@ -30,7 +31,9 @@ export async function upsertEmployee(data: {
     ...(data.color ? { color: data.color } : {}),
     hireDate: data.hireDate ? new Date(data.hireDate) : null,
     notes: data.notes?.trim() || null,
-    isActive: data.isActive ?? true,
+    // Compatibilidad hacia atrás: si algún caller sigue enviando isActive,
+    // lo traducimos al enum. `status` toma precedencia si viene.
+    status: (data.status ?? (data.isActive === false ? 'INACTIVE' : 'ACTIVE')) as any,
   }
 
   const emp = data.id
@@ -299,7 +302,7 @@ export async function duplicateEmployee(data: {
       lastName: data.lastName.trim(),
       email: data.email?.trim() || null,
       phone: data.phone?.trim() || null,
-      isActive: true,
+      status: 'ACTIVE' as any,
       hireDate: new Date(),
       // Config legal (opcional)
       legalFrameworkId: opts.legal ? source.legalFrameworkId : null,

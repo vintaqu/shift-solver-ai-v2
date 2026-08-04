@@ -67,7 +67,7 @@ export async function getMonthData(
 
     // Empleados activos para métricas
     prisma.employee.findMany({
-      where: { organizationId, isActive: true },
+      where: { organizationId, status: 'ACTIVE' as any },
       select: {
         id: true,
         firstName: true,

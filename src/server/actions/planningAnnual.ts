@@ -283,7 +283,7 @@ export async function getAnnualData(organizationId: string, locationId: string, 
       role: emp.skills[0]?.laborRole?.name ?? 'Camarero',
       contractType: contract?.contractType ?? 'FULL_TIME',
       weeklyHours: targetWeekly,
-      isActive: emp.isActive,
+      isActive: (emp as any).status === 'ACTIVE',
       // Horas
       totalHours: Math.round(totalHours * 10) / 10,
       targetHours: targetAnnual,
