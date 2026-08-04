@@ -208,7 +208,7 @@ export function EmployeesSplitClient({ employees: initial, skills, roles, legalF
                         : isSelected
                         ? 'bg-indigo-50 border-l-indigo-600'
                         : 'border-l-transparent hover:bg-gray-50',
-                      !emp.isActive && 'opacity-50',
+                      (emp as any).status !== 'ACTIVE' && 'opacity-50',
                       (emp as any).status === 'ARCHIVED' && 'opacity-40'
                     )}
                   >

@@ -42,17 +42,24 @@ export async function upsertEmployee(data: {
   return emp
 }
 
-// ── Toggle activo/inactivo ─────────────────────────────────────────────────
-export async function toggleEmployeeActive(id: string) {
-  const emp = await prisma.employee.findUnique({ where: { id } })
-  if (!emp) throw new Error('Empleado no encontrado')
-  const updated = await prisma.employee.update({
+// ── Estado del empleado (flujo lineal: ACTIVE → INACTIVE → ARCHIVED) ─────────
+export async function setEmployeeStatus(id: string, status: 'ACTIVE' | 'INACTIVE' | 'ARCHIVED') {
+  const updated = await (prisma.employee.update as any)({
     where: { id },
-    data: { isActive: !emp.isActive },
+    data: { status },
   })
   revalidatePath('/employees')
   revalidatePath(`/employees/${id}`)
+  revalidatePath('/planning')
   return updated
+}
+
+// Alias legacy — mantener para no romper imports que aún lo usen.
+export async function toggleEmployeeActive(id: string) {
+  const emp = await (prisma.employee.findUnique as any)({ where: { id }, select: { status: true } })
+  if (!emp) throw new Error('Empleado no encontrado')
+  const next = (emp.status ?? 'ACTIVE') === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE'
+  return setEmployeeStatus(id, next)
 }
 
 // ── Upsert contrato ────────────────────────────────────────────────────────

@@ -17,7 +17,7 @@ export default async function RestaurantLoginPage({ params }: { params: { slug: 
 
   // Empleados activos con PIN configurado
   const employees = await prisma.employee.findMany({
-    where: { organizationId: org.id, isActive: true, pin: { not: null } },
+    where: { organizationId: org.id, status: 'ACTIVE' as any, pin: { not: null } },
     select: { id: true, firstName: true, lastName: true, color: true },
     orderBy: { firstName: 'asc' },
   })
