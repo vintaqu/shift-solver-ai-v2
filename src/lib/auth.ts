@@ -116,7 +116,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           where: {
             id: parsed.data.employeeId,
             organization: { slug: parsed.data.organizationSlug },
-            isActive: true,
+            status: 'ACTIVE' as any,
           },
           include: {
             organization: { include: { locations: { take: 1 } } },
