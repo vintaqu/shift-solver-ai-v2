@@ -157,26 +157,31 @@ export function employeeColorShades(
   return colorShades(employeeColor(employee, roles))
 }
 
+export interface SkillLike {
+  id?: string
+  name?: string | null
+  color?: string | null
+}
+
 /**
- * Devuelve los roles del empleado que NO son el principal (para el badge "+N").
- * El principal es el de mayor nivel (ver primaryRoleOf). Los adicionales se
- * devuelven ordenados por nivel descendente y luego por priority.
+ * Devuelve las SKILLS reales (Barista, Cajera, Bandejera…) del empleado,
+ * ordenadas por nombre. Se usan para el badge "+N" y su tooltip.
+ * NO incluye las entradas de EmployeeSkill que apuntan a un rol laboral;
+ * solo las que apuntan a un skill de organización.
  */
-export function additionalRolesOf(
+export function employeeSkillsOf(
   employee: EmployeeLike | null | undefined,
-): LaborRoleLike[] {
+): SkillLike[] {
   if (!employee) return []
-  const roles = (employee.skills ?? [])
-    .map(s => s.laborRole)
-    .filter((r): r is LaborRoleLike => !!r)
+  const skills = ((employee.skills ?? []) as any[])
+    .map(es => es.skill)
+    .filter((s): s is SkillLike => !!s && !!s.id)
 
-  if (roles.length <= 1) return []
-
-  const primary = primaryRoleOf(employee)
-  const rest = roles.filter(r => r.id !== primary?.id)
-  return rest.sort((a, b) => {
-    const la = levelOf(a), lb = levelOf(b)
-    if (la !== lb) return lb - la
-    return (a.priority ?? 0) - (b.priority ?? 0)
+  // Deduplicar por id por si acaso.
+  const seen = new Set<string>()
+  const unique = skills.filter(s => {
+    if (!s.id || seen.has(s.id)) return false
+    seen.add(s.id); return true
   })
+  return unique.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))
 }
