@@ -156,3 +156,27 @@ export function employeeColorShades(
 ): ColorShades {
   return colorShades(employeeColor(employee, roles))
 }
+
+/**
+ * Devuelve los roles del empleado que NO son el principal (para el badge "+N").
+ * El principal es el de mayor nivel (ver primaryRoleOf). Los adicionales se
+ * devuelven ordenados por nivel descendente y luego por priority.
+ */
+export function additionalRolesOf(
+  employee: EmployeeLike | null | undefined,
+): LaborRoleLike[] {
+  if (!employee) return []
+  const roles = (employee.skills ?? [])
+    .map(s => s.laborRole)
+    .filter((r): r is LaborRoleLike => !!r)
+
+  if (roles.length <= 1) return []
+
+  const primary = primaryRoleOf(employee)
+  const rest = roles.filter(r => r.id !== primary?.id)
+  return rest.sort((a, b) => {
+    const la = levelOf(a), lb = levelOf(b)
+    if (la !== lb) return lb - la
+    return (a.priority ?? 0) - (b.priority ?? 0)
+  })
+}

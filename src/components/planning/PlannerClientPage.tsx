@@ -18,6 +18,7 @@ import { updateEmployeeOrder } from '@/server/actions/employees'
 import { upsertDateSlot, deleteDateSlot } from '@/server/actions/coverageWeekly'
 import { RoleRequirementsEditor, initialRoleRows, type RoleRow } from '@/components/coverage/RoleRequirementsEditor'
 import { employeeColorShades } from '@/lib/employee-color'
+import { RoleExtraBadge } from '@/components/employees/RoleExtraBadge'
 import { GenerateModal } from './GenerateModal'
 
 // ─── Paleta de colores por empleado ───────────────────────────────────────────
@@ -548,8 +549,9 @@ export function PlannerClientPage({ period, employees: allEmployees, weekDays, a
                     {initials}
                   </div>
                   <div className="min-w-0">
-                    <div className="text-[13px] font-semibold text-gray-800 truncate">
-                      {emp.firstName} {emp.lastName}
+                    <div className="text-[13px] font-semibold text-gray-800 truncate flex items-center gap-1.5">
+                      <span className="truncate">{emp.firstName} {emp.lastName}</span>
+                      <RoleExtraBadge employee={emp} size="sm" />
                     </div>
                     <div className="text-[10px] text-gray-400 truncate">
                       {contractH}h/sem

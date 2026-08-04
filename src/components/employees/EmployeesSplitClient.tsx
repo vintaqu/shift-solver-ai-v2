@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { EmployeeDetailClient } from './EmployeeDetailClient'
+import { RoleExtraBadge } from './RoleExtraBadge'
 import { upsertEmployee, duplicateEmployee, setEmployeeStatus } from '@/server/actions/employees'
 import { employeeColor } from '@/lib/employee-color'
 
@@ -239,6 +240,7 @@ export function EmployeesSplitClient({ employees: initial, skills, roles, legalF
                             {role.name}
                           </span>
                         )}
+                        <RoleExtraBadge employee={emp} size="sm" />
                         {contract && (
                           <span className="text-[10px] text-gray-400 flex items-center gap-0.5">
                             <Clock size={9} /> {contract.weeklyHours}h

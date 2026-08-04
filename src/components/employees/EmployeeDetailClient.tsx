@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { employeeColor, primaryRoleOf } from '@/lib/employee-color'
+import { RoleExtraBadge } from './RoleExtraBadge'
 import {
   upsertEmployee, upsertContract, setEmployeeSkills,
   upsertAvailability, deleteAvailability, setEmployeeStatus
@@ -114,6 +115,7 @@ export function EmployeeDetailClient({ employee: emp, skills: allSkills, roles: 
                   {allRoles.find((r: any) => r.level === mainRoleLevel)?.name || mainRoleLevel}
                 </span>
               )}
+              <RoleExtraBadge employee={emp} />
             </div>
             <div className="flex items-center gap-4 mt-1 text-[12px] text-gray-500">
               {emp.email && <span>{emp.email}</span>}

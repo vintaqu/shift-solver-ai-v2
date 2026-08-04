@@ -12,6 +12,7 @@ import { upsertDateSlot, deleteDateSlot } from '@/server/actions/coverageWeekly'
 import { swapAssignments } from '@/server/actions/planning'
 import { RoleRequirementsEditor, initialRoleRows, type RoleRow } from '@/components/coverage/RoleRequirementsEditor'
 import { employeeColorShades, primaryRoleOf, DEFAULT_EMPLOYEE_COLOR } from '@/lib/employee-color'
+import { RoleExtraBadge } from '@/components/employees/RoleExtraBadge'
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 const DAYS_FULL = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
@@ -452,7 +453,10 @@ export function DayPlannerClient({
                     {initials}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="text-[12px] font-semibold text-gray-800 truncate">{emp.firstName} {emp.lastName}</div>
+                    <div className="text-[12px] font-semibold text-gray-800 truncate flex items-center gap-1.5">
+                      <span className="truncate">{emp.firstName} {emp.lastName}</span>
+                      <RoleExtraBadge employee={emp} size="sm" />
+                    </div>
                     {role && <div className="text-[10px] text-gray-400 truncate">{role.name}</div>}
                   </div>
                   <div className="text-[11px] font-mono text-gray-400 flex-shrink-0">
