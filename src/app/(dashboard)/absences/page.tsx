@@ -22,7 +22,7 @@ export default async function AbsencesPage() {
       orderBy: [{ status: 'asc' }, { startDate: 'asc' }],
     }),
     prisma.employee.findMany({
-      where: { organizationId, isActive: true },
+      where: { organizationId, status: 'ACTIVE' as any },
       select: {
         id: true, firstName: true, lastName: true, color: true,
         vacationDaysType: true, vacationDaysPerYear: true,
