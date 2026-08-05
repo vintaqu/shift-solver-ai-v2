@@ -41,7 +41,9 @@ export function EmployeesSplitClient({ employees: initial, skills, roles, legalF
   }, [initial])
   const [selectedId, setSelectedId] = useState<string | null>(initial[0]?.id ?? null)
   const [search, setSearch] = useState('')
-  const [filterRole, setFilterRole] = useState('all')
+  const [filterRoles, setFilterRoles] = useState<string[]>([])
+  const [filterSkills, setFilterSkills] = useState<string[]>([])
+  const [showFilters, setShowFilters] = useState(false)
   const [filterStatus, setFilterStatus] = useState<'active' | 'inactive' | 'archived' | 'all'>('active')
   const [showCreate, setShowCreate] = useState(false)
   const [addMenuOpen, setAddMenuOpen] = useState(false)
@@ -63,15 +65,27 @@ export function EmployeesSplitClient({ employees: initial, skills, roles, legalF
 
   const filtered = useMemo(() => employees.filter(e => {
     const matchSearch = `${e.firstName} ${e.lastName}`.toLowerCase().includes(search.toLowerCase())
-    const roleLevel = e.skills?.[0]?.laborRole?.level ?? ''
-    const matchRole = filterRole === 'all' || roleLevel === filterRole
+
+    // Rol: coincide si el empleado tiene AL MENOS uno de los roles filtrados
+    // entre TODOS sus roles (no solo el principal).
+    const empRoleIds: string[] = (e.skills ?? [])
+      .map((s: any) => s.laborRoleId)
+      .filter(Boolean)
+    const matchRole = filterRoles.length === 0 || filterRoles.some(r => empRoleIds.includes(r))
+
+    // Etiqueta: coincide si el empleado tiene AL MENOS una de las skills filtradas.
+    const empSkillIds: string[] = (e.skills ?? [])
+      .map((s: any) => s.skillId)
+      .filter(Boolean)
+    const matchSkill = filterSkills.length === 0 || filterSkills.some(s => empSkillIds.includes(s))
+
     const matchStatus =
       filterStatus === 'all' ||
       (filterStatus === 'active'   && (e as any).status === 'ACTIVE') ||
       (filterStatus === 'inactive' && (e as any).status === 'INACTIVE') ||
       (filterStatus === 'archived' && (e as any).status === 'ARCHIVED')
-    return matchSearch && matchRole && matchStatus
-  }), [employees, search, filterRole, filterStatus])
+    return matchSearch && matchRole && matchSkill && matchStatus
+  }), [employees, search, filterRoles, filterSkills, filterStatus])
 
   const selectedEmployee = employees.find(e => e.id === selectedId) ?? null
 
@@ -138,7 +152,118 @@ export function EmployeesSplitClient({ employees: initial, skills, roles, legalF
             />
           </div>
 
-          {/* Filtros */}
+          {/* Botón Filtros + panel */}
+          <div className="relative mt-2">
+            <button
+              onClick={() => setShowFilters(v => !v)}
+              className={cn(
+                'w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-[12px] font-medium border transition-colors',
+                (filterRoles.length + filterSkills.length) > 0
+                  ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
+                  : 'border-gray-200 bg-gray-50 text-gray-600 hover:bg-gray-100'
+              )}
+            >
+              <span className="flex items-center gap-1.5">
+                <Filter size={12} />
+                Filtros
+                {(filterRoles.length + filterSkills.length) > 0 && (
+                  <span className="ml-1 min-w-[16px] h-4 px-1 rounded-full bg-indigo-600 text-white text-[10px] font-bold flex items-center justify-center">
+                    {filterRoles.length + filterSkills.length}
+                  </span>
+                )}
+              </span>
+              {(filterRoles.length + filterSkills.length) > 0 && (
+                <span
+                  onClick={e => { e.stopPropagation(); setFilterRoles([]); setFilterSkills([]) }}
+                  className="text-gray-400 hover:text-red-500 cursor-pointer"
+                  title="Limpiar filtros"
+                >
+                  <X size={12} />
+                </span>
+              )}
+            </button>
+
+            {showFilters && (
+              <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white border border-gray-200 rounded-xl shadow-lg p-3 max-h-[400px] overflow-y-auto">
+                {/* Roles */}
+                <div className="mb-3">
+                  <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">Roles</div>
+                  {roles.length === 0 ? (
+                    <p className="text-[11px] text-gray-400 italic">Sin roles configurados</p>
+                  ) : (
+                    <div className="space-y-1">
+                      {roles.map((r: any) => {
+                        const on = filterRoles.includes(r.id)
+                        return (
+                          <label key={r.id}
+                            className={cn(
+                              'flex items-center gap-2 px-2 py-1 rounded-md cursor-pointer transition-colors',
+                              on ? 'bg-indigo-50' : 'hover:bg-gray-50'
+                            )}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={on}
+                              onChange={e => setFilterRoles(prev => e.target.checked
+                                ? [...prev, r.id]
+                                : prev.filter(id => id !== r.id))}
+                              className="accent-indigo-600 w-3.5 h-3.5"
+                            />
+                            <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: r.color ?? '#9ca3af' }} />
+                            <span className="text-[12px] text-gray-700 flex-1 truncate">{r.name}</span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Etiquetas / skills */}
+                <div>
+                  <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">Etiquetas</div>
+                  {skills.length === 0 ? (
+                    <p className="text-[11px] text-gray-400 italic">Sin etiquetas configuradas</p>
+                  ) : (
+                    <div className="space-y-1">
+                      {skills.map((s: any) => {
+                        const on = filterSkills.includes(s.id)
+                        return (
+                          <label key={s.id}
+                            className={cn(
+                              'flex items-center gap-2 px-2 py-1 rounded-md cursor-pointer transition-colors',
+                              on ? 'bg-amber-50' : 'hover:bg-gray-50'
+                            )}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={on}
+                              onChange={e => setFilterSkills(prev => e.target.checked
+                                ? [...prev, s.id]
+                                : prev.filter(id => id !== s.id))}
+                              className="accent-amber-600 w-3.5 h-3.5"
+                            />
+                            <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: s.color ?? '#f59e0b' }} />
+                            <span className="text-[12px] text-gray-700 flex-1 truncate">{s.name}</span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {(filterRoles.length + filterSkills.length) > 0 && (
+                  <button
+                    onClick={() => { setFilterRoles([]); setFilterSkills([]) }}
+                    className="mt-2 w-full py-1.5 rounded-md text-[11px] font-medium text-red-500 hover:bg-red-50 transition-colors"
+                  >
+                    Limpiar filtros
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Filtros de estado */}
           <div className="flex gap-1 mt-2">
             {[
               { key: 'active',   label: 'Activos' },
