@@ -16,6 +16,7 @@ export default async function EmployeesPage() {
         contracts: { orderBy: { startDate: 'desc' } },
         skills: { include: { skill: true, laborRole: true } },
         availabilities: { orderBy: { dayOfWeek: 'asc' } },
+        legalFramework: true,
         absences: { orderBy: { startDate: 'desc' }, take: 10 },
         assignments: {
           where: { date: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } },

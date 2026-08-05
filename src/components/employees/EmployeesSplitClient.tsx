@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
   Search, Plus, UserX, ChevronRight, Clock,
-  Briefcase, AlertCircle, Filter, Copy, X, Loader2, Info,
+  Briefcase, AlertCircle, Filter, Copy, X, Loader2, Info, Eye,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { EmployeeDetailClient } from './EmployeeDetailClient'
@@ -332,6 +332,7 @@ function DuplicateEmployeeModal({ source, onClose, onCreated }: any) {
   const [opts, setOpts] = useState({
     contract: true, roles: true, restrictions: true, legal: true, vacations: true,
   })
+  const [previewKey, setPreviewKey] = useState<string | null>(null)
 
   const sourceName = `${source.firstName} ${source.lastName}`.trim()
   const has = {
@@ -428,24 +429,36 @@ function DuplicateEmployeeModal({ source, onClose, onCreated }: any) {
             <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Qué copiar</div>
             <div className="space-y-1.5">
               {COPY_ITEMS.map(item => (
-                <label key={item.key}
+                <div key={item.key}
                   className={cn(
                     'flex items-start gap-3 p-2.5 rounded-xl border transition-all',
-                    !item.available ? 'border-gray-100 bg-gray-50/50 opacity-50 cursor-not-allowed'
-                      : opts[item.key] ? 'border-indigo-200 bg-indigo-50/40 cursor-pointer' : 'border-gray-200 cursor-pointer hover:border-gray-300'
+                    !item.available ? 'border-gray-100 bg-gray-50/50 opacity-50'
+                      : opts[item.key] ? 'border-indigo-200 bg-indigo-50/40' : 'border-gray-200 hover:border-gray-300'
                   )}>
-                  <input type="checkbox" className="mt-0.5 accent-indigo-600 w-4 h-4"
-                    disabled={!item.available}
-                    checked={item.available && opts[item.key]}
-                    onChange={e => setOpts(o => ({ ...o, [item.key]: e.target.checked }))} />
-                  <div className="min-w-0">
-                    <div className="text-[13px] font-semibold text-gray-700">
-                      {item.label}
-                      {!item.available && <span className="ml-1.5 text-[10px] font-normal text-gray-400">(el origen no tiene)</span>}
+                  <label className={cn('flex items-start gap-3 flex-1 min-w-0', item.available ? 'cursor-pointer' : 'cursor-not-allowed')}>
+                    <input type="checkbox" className="mt-0.5 accent-indigo-600 w-4 h-4"
+                      disabled={!item.available}
+                      checked={item.available && opts[item.key]}
+                      onChange={e => setOpts(o => ({ ...o, [item.key]: e.target.checked }))} />
+                    <div className="min-w-0">
+                      <div className="text-[13px] font-semibold text-gray-700">
+                        {item.label}
+                        {!item.available && <span className="ml-1.5 text-[10px] font-normal text-gray-400">(el origen no tiene)</span>}
+                      </div>
+                      <div className="text-[11px] text-gray-400">{item.desc}</div>
                     </div>
-                    <div className="text-[11px] text-gray-400">{item.desc}</div>
-                  </div>
-                </label>
+                  </label>
+                  {item.available && (
+                    <button
+                      type="button"
+                      onClick={() => setPreviewKey(item.key)}
+                      title="Ver detalles"
+                      className="flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:text-indigo-600 hover:bg-white transition-colors"
+                    >
+                      <Eye size={14} />
+                    </button>
+                  )}
+                </div>
               ))}
             </div>
           </div>
@@ -465,11 +478,18 @@ function DuplicateEmployeeModal({ source, onClose, onCreated }: any) {
           </button>
         </div>
       </div>
+
+      {/* Preview modal encima del propio DuplicateEmployeeModal */}
+      {previewKey && (
+        <PreviewSectionModal
+          section={previewKey}
+          source={source}
+          onClose={() => setPreviewKey(null)}
+        />
+      )}
     </div>
   )
 }
-
-// ── Modal crear empleado ──────────────────────────────────────────────────────
 function CreateEmployeeModal({ organizationId, onClose, onCreated }: any) {
   const [isPending, startTransition] = useTransition()
   const [form, setForm] = useState({
@@ -559,6 +579,167 @@ function CreateEmployeeModal({ organizationId, onClose, onCreated }: any) {
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+// ─── Preview de sección al copiar empleado ─────────────────────────────────────
+// Muestra en solo lectura qué información se va a copiar del empleado origen.
+// Se abre encima del DuplicateEmployeeModal, sin cerrar el flujo de copia.
+function PreviewSectionModal({ section, source, onClose }: { section: string; source: any; onClose: () => void }) {
+  const titles: Record<string, string> = {
+    contract: 'Contrato',
+    roles: 'Roles y etiquetas',
+    restrictions: 'Restricciones recurrentes',
+    legal: 'Marco legal',
+    vacations: 'Vacaciones',
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-[3px]" />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-[480px] max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="px-5 py-4 border-b border-gray-100 flex-shrink-0" style={{ background: 'linear-gradient(135deg,#eef2ff,#f5f3ff)' }}>
+          <div className="flex items-center justify-between">
+            <h3 className="text-[14px] font-bold text-gray-900">{titles[section]} de {source.firstName} {source.lastName}</h3>
+            <button onClick={onClose} className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:bg-white">
+              <X size={14} />
+            </button>
+          </div>
+          <p className="text-[11px] text-gray-500 mt-0.5">Vista previa de lo que se copiará</p>
+        </div>
+
+        <div className="px-5 py-4 overflow-y-auto flex-1">
+          {section === 'contract' && <ContractPreview source={source} />}
+          {section === 'roles' && <RolesPreview source={source} />}
+          {section === 'restrictions' && <RestrictionsPreview source={source} />}
+          {section === 'legal' && <LegalPreview source={source} />}
+          {section === 'vacations' && <VacationsPreview source={source} />}
+        </div>
+
+        <div className="flex justify-end px-5 py-3 border-t border-gray-100 bg-gray-50/50 flex-shrink-0">
+          <button onClick={onClose} className="px-4 py-1.5 rounded-lg text-[12px] font-medium text-gray-600 hover:bg-white transition-colors">Cerrar</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Helper para pintar cada línea "Etiqueta: valor" de forma consistente.
+function PreviewRow({ label, value }: { label: string; value: any }) {
+  return (
+    <div className="flex items-start justify-between gap-3 py-2 border-b border-gray-100 last:border-b-0">
+      <span className="text-[11px] text-gray-500 font-medium flex-shrink-0">{label}</span>
+      <span className="text-[12px] text-gray-800 text-right">{value ?? <span className="text-gray-300">—</span>}</span>
+    </div>
+  )
+}
+
+const CONTRACT_TYPE_LABELS: Record<string, string> = {
+  FULL_TIME: 'Tiempo completo',
+  PART_TIME: 'Tiempo parcial',
+  TEMPORARY: 'Temporal',
+  INTERN: 'Prácticas',
+}
+
+function ContractPreview({ source }: { source: any }) {
+  const c = source.contracts?.find((x: any) => x.isActive) ?? source.contracts?.[0]
+  if (!c) return <p className="text-[12px] text-gray-400 italic py-4 text-center">Sin contrato activo</p>
+  return (
+    <div>
+      <PreviewRow label="Tipo" value={CONTRACT_TYPE_LABELS[c.contractType] ?? c.contractType} />
+      <PreviewRow label="Horas semanales" value={`${c.weeklyHours}h`} />
+      {(c.minWeeklyHours != null || c.maxWeeklyHours != null) && (
+        <PreviewRow label="Horquilla" value={`${c.minWeeklyHours ?? '—'}h – ${c.maxWeeklyHours ?? '—'}h`} />
+      )}
+      <PreviewRow label="Máx. horas/día" value={`${c.maxDailyHours}h`} />
+      <PreviewRow label="Máx. días consecutivos" value={c.maxConsecutiveDays} />
+      <PreviewRow label="Descanso mín. entre jornadas" value={`${c.minRestBetweenShifts}h`} />
+      <PreviewRow label="Máx. horas/año" value={`${c.annualMaxHours}h`} />
+      {c.hourlyWage != null && <PreviewRow label="Coste/hora" value={`${c.hourlyWage} €`} />}
+      {c.collectiveAgreement && <PreviewRow label="Convenio" value={c.collectiveAgreement} />}
+    </div>
+  )
+}
+
+function RolesPreview({ source }: { source: any }) {
+  const skills = source.skills ?? []
+  const roles = skills.filter((s: any) => s.laborRole).map((s: any) => s.laborRole)
+  const tags = skills.filter((s: any) => s.skill).map((s: any) => s.skill)
+
+  if (roles.length === 0 && tags.length === 0) return <p className="text-[12px] text-gray-400 italic py-4 text-center">Sin roles ni etiquetas</p>
+
+  return (
+    <div className="space-y-3">
+      {roles.length > 0 && (
+        <div>
+          <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Roles laborales</div>
+          <div className="flex flex-wrap gap-1.5">
+            {roles.map((r: any) => (
+              <span key={r.id} className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2 py-1 rounded-full text-white" style={{ backgroundColor: r.color ?? '#9ca3af' }}>
+                {r.name}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+      {tags.length > 0 && (
+        <div>
+          <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Habilidades / etiquetas</div>
+          <div className="flex flex-wrap gap-1.5">
+            {tags.map((t: any) => (
+              <span key={t.id} className="inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-1 rounded-full" style={{ backgroundColor: (t.color ?? '#f59e0b') + '20', color: t.color ?? '#f59e0b', borderWidth: 1, borderStyle: 'solid', borderColor: (t.color ?? '#f59e0b') + '40' }}>
+                {t.name}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+const DAY_NAMES = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
+const AVAIL_TYPE_LABELS: Record<string, string> = {
+  NOT_BEFORE: 'No antes de',
+  NOT_AFTER: 'No después de',
+  DAY_OFF: 'Día libre',
+  ONLY_BETWEEN: 'Solo entre',
+  PREFER: 'Prefiere',
+}
+
+function RestrictionsPreview({ source }: { source: any }) {
+  const recurring = (source.availabilities ?? []).filter((a: any) => a.isRecurring)
+  if (recurring.length === 0) return <p className="text-[12px] text-gray-400 italic py-4 text-center">Sin restricciones recurrentes</p>
+
+  return (
+    <div className="space-y-1">
+      {recurring.map((a: any) => (
+        <div key={a.id} className="flex items-center gap-2 p-2 rounded-lg bg-gray-50 text-[12px]">
+          <span className="font-semibold text-gray-700 w-9">{a.dayOfWeek != null ? DAY_NAMES[a.dayOfWeek] : 'Todos'}</span>
+          <span className="text-gray-500">{AVAIL_TYPE_LABELS[a.type] ?? a.type}</span>
+          {a.startTime && <span className="text-gray-700 font-mono text-[11px]">{a.startTime}{a.endTime ? `–${a.endTime}` : ''}</span>}
+          {a.notes && <span className="text-[10px] text-gray-400 truncate ml-auto">{a.notes}</span>}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function LegalPreview({ source }: { source: any }) {
+  return (
+    <div>
+      <PreviewRow label="Marco legal" value={source.legalFramework?.name ?? 'Usa el de la organización'} />
+      <PreviewRow label="Validación legal" value={source.skipLegalValidation ? '❌ Omitida (dueño/socio)' : '✅ Activada'} />
+    </div>
+  )
+}
+
+function VacationsPreview({ source }: { source: any }) {
+  return (
+    <div>
+      <PreviewRow label="Tipo de cómputo" value={source.vacationDaysType === 'NATURALES' ? 'Días naturales' : 'Días laborables'} />
+      <PreviewRow label="Días por año" value={`${source.vacationDaysPerYear} días`} />
     </div>
   )
 }
