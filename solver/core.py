@@ -49,13 +49,17 @@ from schemas import (
 DESCANSO_MIN_ENTRE_JORNADAS_MIN = 12 * 60
 SEMANA_MIN = 7 * 24 * 60
 
-SLOTS_TRAMO_MIN = 6              # 3 h
+SLOTS_TRAMO_MIN = 4              # 2 h mínimo por tramo — permite turnos cortos cuando la demanda es corta
+SLOTS_TRAMO_MIN_PARTIDA = 6      # 3 h mínimo por tramo cuando es jornada partida (más exigente)
 SLOTS_TRAMO_MAX_PARTIDA = 10     # 5 h
 SLOTS_GAP_MIN_PARTIDA = 3        # 1.5 h
 SLOTS_DIA_MAX = 18               # 9 h ordinarias
 N_TRAMOS_MAX = 2
 
-PESO_HUECO = 1_000_000
+PESO_HUECO = 1_000_000     # deficit sobre el MINIMO por rol (casi inviolable)
+PESO_IDEAL = 10_000        # deficit sobre el IDEAL por rol (blando: se prefiere
+                           #   cubrir el ideal antes que evitar un turno partido,
+                           #   pero muy por debajo de romper un minimo)
 PESO_PARTIDA = 1_000
 PESO_DISPERSION = 100
 PESO_SOBRECUB = 1
@@ -81,7 +85,11 @@ class Problema:
     etiquetas: List[str]
     trabajadores: List[dict]
     demanda_num_dia: Dict[str, List[int]]
-    demanda_rol_dia: Dict[str, List[Dict[str, int]]]
+    # Por slot: {rol: (min, ideal)}. min = restriccion dura (huecos penalizados),
+    # ideal = objetivo blando (se premia alcanzarlo con penalizacion suave).
+    demanda_rol_dia: Dict[str, List[Dict[str, Tuple[int, int]]]]
+    # Ideal numerico total por slot (suma de ideales de todos los roles).
+    demanda_ideal_dia: Dict[str, List[int]]
     etiquetas_dia: Dict[str, List[List[str]]]
     parametros: Parametros = field(default_factory=Parametros)
 
@@ -165,14 +173,30 @@ def _expandir_franjas_num(franjas, apertura_min, n_slots, slot_duracion_min):
 
 
 def _expandir_franjas_rol(franjas, apertura_min, n_slots, slot_duracion_min):
-    out = [{} for _ in range(n_slots)]
+    """Expande a un vector de slots donde cada slot es {rol: (min, ideal)}.
+
+    Acepta tanto el formato nuevo (DemandaRol con .min/.ideal) como el antiguo
+    ya normalizado por el schema; en cualquier caso trabaja sobre DemandaRol.
+    """
+    out: List[Dict[str, Tuple[int, int]]] = [{} for _ in range(n_slots)]
     for f in franjas:
         h_ini = _hora_a_min(f.inicio)
         h_fin = _hora_fin_a_min(f.fin)
         s_ini = (h_ini - apertura_min) // slot_duracion_min
         s_fin = (h_fin - apertura_min) // slot_duracion_min
+        mapa: Dict[str, Tuple[int, int]] = {}
+        for rol, dem in f.personas_por_rol.items():
+            # `dem` es DemandaRol (min/ideal) tras la validacion del schema.
+            mn = getattr(dem, "min", None)
+            if mn is None:
+                # Defensa extra por si llegara un int suelto.
+                mn = int(dem)
+                idl = mn
+            else:
+                idl = getattr(dem, "ideal", mn)
+            mapa[rol] = (int(mn), int(idl))
         for s in range(s_ini, s_fin):
-            out[s] = dict(f.personas_por_rol)
+            out[s] = dict(mapa)
     return out
 
 
@@ -244,11 +268,14 @@ def cargar_problema(request: ScheduleRequest) -> Problema:
             "rol": t.rol,
             "etiquetas": list(t.etiquetas),
             "restricciones": restricciones_dict,
+            "min_horas_jornada": getattr(t, "min_horas_jornada",
+                getattr(request.parametros, "min_horas_jornada_global", 2.0)),
         })
 
     # Expandir franjas a vectores por slot, dia a dia.
     demanda_num_dia: Dict[str, List[int]] = {}
-    demanda_rol_dia: Dict[str, List[Dict[str, int]]] = {}
+    demanda_ideal_dia: Dict[str, List[int]] = {}
+    demanda_rol_dia: Dict[str, List[Dict[str, Tuple[int, int]]]] = {}
     etiquetas_dia: Dict[str, List[List[str]]] = {}
     for d in request.dias:
         ap_str, ci_str = horario_apertura[d]
@@ -256,14 +283,41 @@ def cargar_problema(request: ScheduleRequest) -> Problema:
         n_slots = (
             _hora_fin_a_min(ci_str) - apertura_min
         ) // slot_duracion_min
-        demanda_num_dia[d] = _expandir_franjas_num(
-            request.franjas_num.get(d, []),
-            apertura_min, n_slots, slot_duracion_min,
-        )
+
         demanda_rol_dia[d] = _expandir_franjas_rol(
             request.franjas_rol.get(d, []),
             apertura_min, n_slots, slot_duracion_min,
         )
+
+        # La demanda numerica total (min) y el ideal total se DERIVAN del
+        # desglose por rol: son la suma de minimos y de ideales del slot.
+        # `franjas_num` queda como fallback para requests legacy que no
+        # traigan desglose por rol.
+        num_desde_rol = [
+            sum(mn for (mn, _idl) in demanda_rol_dia[d][s].values())
+            for s in range(n_slots)
+        ]
+        ideal_desde_rol = [
+            sum(idl for (_mn, idl) in demanda_rol_dia[d][s].values())
+            for s in range(n_slots)
+        ]
+
+        num_legacy = _expandir_franjas_num(
+            request.franjas_num.get(d, []),
+            apertura_min, n_slots, slot_duracion_min,
+        )
+
+        # Si hay desglose por rol en el slot, manda el desglose; si no, se usa
+        # el numerico legacy (y el ideal se iguala al minimo por falta de dato).
+        demanda_num_dia[d] = [
+            num_desde_rol[s] if demanda_rol_dia[d][s] else num_legacy[s]
+            for s in range(n_slots)
+        ]
+        demanda_ideal_dia[d] = [
+            ideal_desde_rol[s] if demanda_rol_dia[d][s] else num_legacy[s]
+            for s in range(n_slots)
+        ]
+
         etiquetas_dia[d] = _expandir_franjas_eti(
             request.franjas_eti.get(d, []),
             apertura_min, n_slots, slot_duracion_min,
@@ -278,21 +332,26 @@ def cargar_problema(request: ScheduleRequest) -> Problema:
         etiquetas=list(request.etiquetas),
         trabajadores=trabajadores,
         demanda_num_dia=demanda_num_dia,
+        demanda_ideal_dia=demanda_ideal_dia,
         demanda_rol_dia=demanda_rol_dia,
         etiquetas_dia=etiquetas_dia,
         parametros=request.parametros,
     )
 
-    # Sanity check: la suma del desglose por rol debe coincidir con la
-    # demanda numerica total slot a slot.
+    # Sanity check: la suma de MINIMOS del desglose por rol debe coincidir con
+    # la demanda numerica minima total slot a slot. Como demanda_num_dia se
+    # deriva del propio desglose cuando este existe, la igualdad se cumple por
+    # construccion; el check protege frente a requests legacy inconsistentes.
     for d in problema.dias:
         for s in range(problema.num_slots_dia(d)):
-            suma_rol = sum(problema.demanda_rol_dia[d][s].values())
+            if not problema.demanda_rol_dia[d][s]:
+                continue  # slot sin desglose (legacy): nada que comprobar
+            suma_min_rol = sum(mn for (mn, _i) in problema.demanda_rol_dia[d][s].values())
             num = problema.demanda_num_dia[d][s]
-            if suma_rol != num:
+            if suma_min_rol != num:
                 raise ValueError(
-                    f"Inconsistencia: {d} slot {s} -> demanda numerica = {num} "
-                    f"pero suma por rol = {suma_rol}"
+                    f"Inconsistencia: {d} slot {s} -> demanda minima numerica = {num} "
+                    f"pero suma de minimos por rol = {suma_min_rol}"
                 )
     # Sanity check: todas las etiquetas listadas estan en el catalogo.
     catalogo_etis = set(problema.etiquetas)
@@ -317,6 +376,7 @@ class ModeloVars:
     de resolver para serializar el response."""
     x: dict
     huecos: dict
+    deficit_ideal: dict
     huecos_eti: dict
     trabaja_dia: dict
     es_partida_dia: dict
@@ -370,28 +430,67 @@ def construir_modelo(problema: Problema) -> Tuple[cp_model.CpModel, ModeloVars]:
             if slots_v:
                 model.Add(sum(x[(w, d, s)] for s in slots_v) >= 1)
 
-    # 0.7: cobertura por rol jerarquico acumulado, blanda con huecos.
-    huecos = {}
+    # 0.7: cobertura por rol jerarquico acumulado.
+    #  - MINIMO: restriccion blanda con hueco muy penalizado (PESO_HUECO).
+    #  - IDEAL:  objetivo blando con deficit levemente penalizado (PESO_IDEAL),
+    #            solo por la parte que supera el minimo (ideal - min acumulado).
+    # La jerarquia es acumulada: el nivel `nivel_idx` exige personas de ese rol
+    # o superior. Asi un encargado cubre demanda de camarero, no al reves.
+    huecos = {}          # deficit respecto al MINIMO (hueco real)
+    deficit_ideal = {}   # deficit respecto al IDEAL (sobrecobertura no alcanzada)
     for d in p.dias:
         for s in range(p.num_slots_dia(d)):
             demanda_s = p.demanda_rol_dia[d][s]
+
+            # RESTRICCIÓN DURA: si no hay demanda en este slot, nadie puede
+            # trabajar aquí. Evita que el solver rellene franjas sin demanda
+            # solo para cumplir el mínimo de jornada de un empleado.
+            total_ideal_slot = sum(v[1] for v in demanda_s.values()) if demanda_s else 0
+            if total_ideal_slot == 0:
+                for w in range(n_trab):
+                    model.Add(x[(w, d, s)] == 0)
+                continue
+
             for nivel_idx in range(len(p.roles_jerarquia)):
                 roles_validos = p.roles_jerarquia[nivel_idx:]
-                demanda_acum = sum(
-                    demanda_s.get(r, 0) for r in roles_validos
+                min_acum = sum(
+                    demanda_s.get(r, (0, 0))[0] for r in roles_validos
                 )
-                if demanda_acum == 0:
+                ideal_acum = sum(
+                    demanda_s.get(r, (0, 0))[1] for r in roles_validos
+                )
+                if ideal_acum == 0:
                     continue
+
                 asignados = sum(
                     x[(w, d, s)]
                     for w in range(n_trab)
                     if p.trabajadores[w]["rol"] in roles_validos
                 )
-                hueco = model.NewIntVar(
-                    0, demanda_acum, f"hueco_{d}_{s}_n{nivel_idx}"
-                )
-                model.Add(asignados + hueco >= demanda_acum)
-                huecos[(d, s, nivel_idx)] = hueco
+
+                # --- Minimo (duro-blando) ---
+                if min_acum > 0:
+                    hueco = model.NewIntVar(
+                        0, min_acum, f"hueco_{d}_{s}_n{nivel_idx}"
+                    )
+                    model.Add(asignados + hueco >= min_acum)
+                    huecos[(d, s, nivel_idx)] = hueco
+
+                # --- Ideal (blando ligero) ---
+                # df = personas que faltan para llegar al ideal, ACOTADO al
+                # tramo [0, ideal-min] para no solaparse con el hueco del minimo
+                # (ese tramo ya lo penaliza `hueco` con peso mucho mayor).
+                #   df >= ideal_acum - asignados      (deficit hasta el ideal)
+                #   0 <= df <= margen                 (cota que evita doble conteo)
+                # Cuando asignados >= ideal_acum, df = 0 (no penaliza).
+                # Cuando asignados <= min_acum, df se satura en `margen`.
+                margen = ideal_acum - min_acum
+                if margen > 0:
+                    df = model.NewIntVar(
+                        0, margen, f"defideal_{d}_{s}_n{nivel_idx}"
+                    )
+                    model.Add(df >= ideal_acum - asignados)
+                    deficit_ideal[(d, s, nivel_idx)] = df
 
     # 0.8: etiquetas por slot, blandas.
     huecos_eti = {}
@@ -496,7 +595,26 @@ def construir_modelo(problema: Problema) -> Tuple[cp_model.CpModel, ModeloVars]:
                 model.Add(n_tramos_dia <= N_TRAMOS_MAX)
             model.Add(total_dia <= SLOTS_DIA_MAX)
 
+            # 0.9b: jornada minima diaria — si trabaja, debe superar min_horas_jornada.
+            # Evita que el solver coloque turnos de 3h cuando el contrato
+            # y la demanda permiten jornadas mas largas y coherentes.
+            min_horas_j = t_info.get("min_horas_jornada", 2.0)
+            slots_min_jornada = max(1, int(min_horas_j * p.slots_por_hora))
+            # Si trabaja_dia[(w,d)] == True -> total_dia >= slots_min_jornada
+            # (OnlyEnforceIf asegura que la restriccion solo actua si trabaja)
+            if (w, d) in trabaja_dia:
+                model.Add(total_dia >= slots_min_jornada).OnlyEnforceIf(
+                    trabaja_dia[(w, d)]
+                )
+
+            es_partida = model.NewBoolVar(f"partida_{w}_{d}")
+            model.Add(n_tramos_dia == N_TRAMOS_MAX).OnlyEnforceIf(es_partida)
+            model.Add(n_tramos_dia <= 1).OnlyEnforceIf(es_partida.Not())
+            es_partida_dia[(w, d)] = es_partida
+
             for s in range(n):
+                # Mínimo genérico: si empieza un tramo aquí, los siguientes
+                # (SLOTS_TRAMO_MIN - 1) slots deben estar ocupados (jornada continua o partida).
                 if s + SLOTS_TRAMO_MIN - 1 >= n:
                     model.Add(inicio_tramo[(w, d, s)] == 0)
                 else:
@@ -504,16 +622,28 @@ def construir_modelo(problema: Problema) -> Tuple[cp_model.CpModel, ModeloVars]:
                         model.Add(
                             x[(w, d, s + i)] >= inicio_tramo[(w, d, s)]
                         )
+                # Refuerzo para JORNADA PARTIDA: cada tramo debe ser ≥3h.
+                # Si empieza un tramo aquí Y el día es partida, los siguientes
+                # (SLOTS_TRAMO_MIN_PARTIDA - 1) slots deben estar ocupados.
+                # Si no cabe, el solver deberá cerrar el día como continua o no trabajar.
+                if s + SLOTS_TRAMO_MIN_PARTIDA - 1 < n:
+                    for i in range(SLOTS_TRAMO_MIN, SLOTS_TRAMO_MIN_PARTIDA):
+                        # x[s+i] >= inicio_tramo[s] + es_partida - 1
+                        # (solo obliga si ambos son 1)
+                        model.Add(
+                            x[(w, d, s + i)] >= inicio_tramo[(w, d, s)] + es_partida - 1
+                        )
+                else:
+                    # No cabe un tramo de 3h desde aquí ⇒ si arranca un tramo,
+                    # el día no puede ser partida.
+                    model.Add(inicio_tramo[(w, d, s)] + es_partida <= 1)
+
             for s in range(n):
                 for s2 in range(s + 1, min(s + 1 + SLOTS_GAP_MIN_PARTIDA, n)):
                     model.Add(
                         fin_tramo[(w, d, s)] + inicio_tramo[(w, d, s2)] <= 1
                     )
 
-            es_partida = model.NewBoolVar(f"partida_{w}_{d}")
-            model.Add(n_tramos_dia == N_TRAMOS_MAX).OnlyEnforceIf(es_partida)
-            model.Add(n_tramos_dia <= 1).OnlyEnforceIf(es_partida.Not())
-            es_partida_dia[(w, d)] = es_partida
             for s in range(n - SLOTS_TRAMO_MAX_PARTIDA):
                 model.Add(
                     sum(
@@ -538,13 +668,14 @@ def construir_modelo(problema: Problema) -> Tuple[cp_model.CpModel, ModeloVars]:
     model.Minimize(
         PESO_HUECO * sum(huecos.values())
         + PESO_HUECO * sum(huecos_eti.values())
+        + PESO_IDEAL * sum(deficit_ideal.values())
         + PESO_PARTIDA * sum(es_partida_dia.values())
         + PESO_DISPERSION * dispersion
         + PESO_SOBRECUB * sum(x.values())
     )
 
     return model, ModeloVars(
-        x=x, huecos=huecos, huecos_eti=huecos_eti,
+        x=x, huecos=huecos, deficit_ideal=deficit_ideal, huecos_eti=huecos_eti,
         trabaja_dia=trabaja_dia, es_partida_dia=es_partida_dia,
     )
 
@@ -679,11 +810,19 @@ def serializar_response(
             }
             ini, fin = p.slot_a_horario(d, s)
             demanda_total = p.demanda_num_dia[d][s]
+            demanda_ideal = p.demanda_ideal_dia[d][s]
+            # Deficit respecto al ideal en el nivel base (nivel 0 = total del slot).
+            falta_ideal_slot = (
+                solver.Value(vars_.deficit_ideal[(d, s, 0)])
+                if (d, s, 0) in vars_.deficit_ideal else 0
+            )
             huecos_cob.append(HuecoCobertura(
                 dia=d, inicio=ini, fin=fin,
                 demanda_total=demanda_total,
                 cubierto=demanda_total - ef,
                 falta_personas=ef,
+                falta_ideal=falta_ideal_slot,
+                demanda_ideal=demanda_ideal,
                 falta_por_nivel=por_nivel,
             ))
 
@@ -952,9 +1091,13 @@ def diagnosticar_infactibilidad(
                 if _trabajador_rol_indice(t, p.roles_jerarquia) >= nivel_idx
                 and _trabajador_disponible_dia(t, d)
             )
+            # Usamos el MINIMO acumulado por nivel (lo que realmente hay que cubrir).
             max_acumulado_demandado = max(
                 (
-                    sum(p.demanda_rol_dia[d][s].get(r, 0) for r in p.roles_jerarquia[nivel_idx:])
+                    sum(
+                        p.demanda_rol_dia[d][s].get(r, (0, 0))[0]
+                        for r in p.roles_jerarquia[nivel_idx:]
+                    )
                     for s in range(p.num_slots_dia(d))
                 ),
                 default=0,
