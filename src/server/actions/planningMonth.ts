@@ -73,12 +73,19 @@ export async function getMonthData(
         firstName: true,
         lastName: true,
         color: true,
+        skills: {
+          include: {
+            laborRole: { select: { id: true, name: true, color: true, level: true, priority: true } },
+            skill: { select: { id: true, name: true, color: true } },
+          },
+        },
         contracts: {
           where: { isActive: true },
           take: 1,
           select: { weeklyHours: true },
         },
       },
+      orderBy: [{ firstName: 'asc' }],
     }),
   ])
 
@@ -218,7 +225,49 @@ export async function getMonthData(
       lastName: e.lastName,
       color: e.color,
       weeklyHours: e.contracts[0]?.weeklyHours ?? 0,
+      skills: (e as any).skills ?? [],
     })),
+    // Estructura por empleado × día para la cuadrícula tipo Skello.
+    // Clave: "employeeId|YYYY-MM-DD" → array de turnos ese día (soporta partida).
+    employeeShifts: (() => {
+      const map: Record<string, Array<{
+        id: string; date: string; startTime: string; endTime: string
+        breakMinutes: number; totalMinutes: number
+      }>> = {}
+      for (const p of periods) {
+        for (const a of p.assignments) {
+          const date = format(new Date(a.date), 'yyyy-MM-dd')
+          const key = `${a.employeeId}|${date}`
+          if (!map[key]) map[key] = []
+          const [sh, sm] = a.startTime.split(':').map(Number)
+          const [eh, em] = a.endTime === '00:00' ? [24, 0] : a.endTime.split(':').map(Number)
+          const totalMin = (eh * 60 + em) - (sh * 60 + sm) - (a.breakMinutes ?? 0)
+          map[key].push({
+            id: a.id, date,
+            startTime: a.startTime, endTime: a.endTime,
+            breakMinutes: a.breakMinutes ?? 0,
+            totalMinutes: Math.max(0, totalMin),
+          })
+        }
+      }
+      // Ordenar turnos de cada día por hora de inicio (partida: mañana, tarde).
+      for (const k of Object.keys(map)) {
+        map[k].sort((a, b) => a.startTime.localeCompare(b.startTime))
+      }
+      return map
+    })(),
+    // Totales de horas por empleado en el mes (para la columna derecha).
+    employeeMonthHours: (() => {
+      const map: Record<string, number> = {}
+      for (const p of periods) {
+        for (const a of p.assignments) {
+          const date = new Date(a.date)
+          if (date < monthStart || date > monthEnd) continue
+          map[a.employeeId] = (map[a.employeeId] ?? 0) + a.normalHours
+        }
+      }
+      return map
+    })(),
     metrics: monthMetrics,
     calStart: format(calStart, 'yyyy-MM-dd'),
     calEnd: format(calEnd, 'yyyy-MM-dd'),
