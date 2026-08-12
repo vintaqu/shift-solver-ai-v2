@@ -105,6 +105,7 @@ export function MonthCalendarClient({ year, month, data, organizationId, locatio
   const [isPending, startTransition] = useTransition()
   const [showSidePanel, setShowSidePanel] = useState(true)
   const [selectedCell, setSelectedCell] = useState<{ empId: string; date: string } | null>(null)
+  const [hoveredWeek, setHoveredWeek] = useState<string | null>(null)  // lunes ISO de la semana bajo hover
 
   const monthDate = useMemo(() => new Date(year, month - 1, 1), [year, month])
 
@@ -112,6 +113,37 @@ export function MonthCalendarClient({ year, month, data, organizationId, locatio
   const days = useMemo(() => {
     return eachDayOfInterval({ start: startOfMonth(monthDate), end: endOfMonth(monthDate) })
   }, [monthDate])
+
+  // Mapa día → lunes ISO de su semana (para agrupar por semana)
+  const dayToWeekStart = useMemo(() => {
+    const map: Record<string, string> = {}
+    for (const d of days) {
+      const iso = format(d, 'yyyy-MM-dd')
+      const dow = (d.getDay() + 6) % 7 // 0=lunes, 6=domingo
+      const monday = new Date(d)
+      monday.setDate(monday.getDate() - dow)
+      map[iso] = format(monday, 'yyyy-MM-dd')
+    }
+    return map
+  }, [days])
+
+  // Mapa lunes ISO → periodId (para poder navegar al semanal si existe)
+  const weekStartToPeriodId = useMemo(() => {
+    const map: Record<string, string> = {}
+    for (const p of data.periods) {
+      map[p.weekStart] = p.id
+    }
+    return map
+  }, [data.periods])
+
+  function handleWeekClick(weekStart: string) {
+    const periodId = weekStartToPeriodId[weekStart]
+    if (periodId) {
+      router.push(`/planning/week/${periodId}`)
+    } else {
+      toast.info('No hay semana creada para estas fechas todavía')
+    }
+  }
 
   // Mapa de ausencia por (empleado, día). Marca cada día del rango.
   const absenceMap = useMemo(() => {
@@ -192,6 +224,10 @@ export function MonthCalendarClient({ year, month, data, organizationId, locatio
             employeeMonthHours={data.employeeMonthHours}
             absenceMap={absenceMap}
             selectedCell={selectedCell}
+            dayToWeekStart={dayToWeekStart}
+            hoveredWeek={hoveredWeek}
+            onHoverWeek={setHoveredWeek}
+            onWeekClick={handleWeekClick}
             onCellClick={(empId, date) => {
               setSelectedCell({ empId, date })
             }}
@@ -219,19 +255,23 @@ export function MonthCalendarClient({ year, month, data, organizationId, locatio
 }
 
 // ─── Cuadrícula empleado × día ───────────────────────────────────────────
-function MonthGrid({ days, employees, employeeShifts, employeeMonthHours, absenceMap, selectedCell, onCellClick, onDayHeaderClick }: {
+function MonthGrid({ days, employees, employeeShifts, employeeMonthHours, absenceMap, selectedCell, dayToWeekStart, hoveredWeek, onHoverWeek, onWeekClick, onCellClick, onDayHeaderClick }: {
   days: Date[]
   employees: Employee[]
   employeeShifts: Record<string, EmployeeShift[]>
   employeeMonthHours: Record<string, number>
   absenceMap: Record<string, Absence>
   selectedCell: { empId: string; date: string } | null
+  dayToWeekStart: Record<string, string>
+  hoveredWeek: string | null
+  onHoverWeek: (weekStart: string | null) => void
+  onWeekClick: (weekStart: string) => void
   onCellClick: (empId: string, date: string) => void
   onDayHeaderClick: (date: string) => void
 }) {
   const COL_EMP = 200   // ancho columna empleado
-  const COL_DAY = 88    // ancho por día
-  const COL_TOTAL = 80  // ancho columna total del mes
+  const COL_DAY = 64    // ancho por día — compacto tipo Skello
+  const COL_TOTAL = 72  // ancho columna total del mes
 
   return (
     <div className="inline-block min-w-full">
@@ -247,17 +287,28 @@ function MonthGrid({ days, employees, employeeShifts, employeeMonthHours, absenc
           const dow = d.getDay()
           const isW = isWeekend(d)
           const isTd = isToday(d)
+          const weekStart = dayToWeekStart[iso]
+          const isSunday = dow === 0
+          const isInHoveredWeek = hoveredWeek === weekStart
           return (
-            <button
+            <div
               key={iso}
-              onClick={() => onDayHeaderClick(iso)}
+              onMouseEnter={() => onHoverWeek(weekStart)}
+              onMouseLeave={() => onHoverWeek(null)}
+              onClick={e => {
+                // Click en el día → vista diaria. Con Shift o el chip de semana → semanal.
+                if (e.shiftKey) onWeekClick(weekStart)
+                else onDayHeaderClick(iso)
+              }}
               className={cn(
-                'flex flex-col items-center justify-center py-2 border-r border-gray-100 hover:bg-indigo-50 transition-colors',
+                'flex flex-col items-center justify-center py-2 cursor-pointer transition-colors relative',
+                isSunday ? 'border-r-2 border-r-gray-300' : 'border-r border-gray-100',
                 isW && 'bg-gray-50',
-                isTd && 'bg-indigo-50'
+                isTd && 'bg-indigo-50',
+                isInHoveredWeek && 'bg-indigo-50/70'
               )}
               style={{ width: COL_DAY, minWidth: COL_DAY }}
-              title={format(d, 'EEEE d MMMM', { locale: es })}>
+              title={`${format(d, 'EEEE d MMMM', { locale: es })} — clic: día · shift+clic: semana`}>
               <span className={cn('text-[10px] font-semibold uppercase',
                 isTd ? 'text-indigo-600' : isW ? 'text-gray-400' : 'text-gray-500')}>
                 {DOW_ES[dow]}
@@ -266,7 +317,16 @@ function MonthGrid({ days, employees, employeeShifts, employeeMonthHours, absenc
                 isTd ? 'text-indigo-700' : isW ? 'text-gray-500' : 'text-gray-900')}>
                 {d.getDate()}
               </span>
-            </button>
+              {/* Botón "semana" que aparece al hover */}
+              {isInHoveredWeek && dow === 4 && (
+                <button
+                  onClick={e => { e.stopPropagation(); onWeekClick(weekStart) }}
+                  className="absolute -bottom-[1px] left-1/2 -translate-x-1/2 z-30 text-[9px] font-bold text-white bg-indigo-600 rounded-b px-1.5 py-0.5 shadow whitespace-nowrap hover:bg-indigo-700"
+                >
+                  Ver semana
+                </button>
+              )}
+            </div>
           )
         })}
 
@@ -313,16 +373,24 @@ function MonthGrid({ days, employees, employeeShifts, employeeMonthHours, absenc
               const absence = absenceMap[key]
               const isTd = isToday(d)
               const isW = isWeekend(d)
+              const dow = d.getDay()
+              const isSunday = dow === 0
               const isSel = selectedCell?.empId === emp.id && selectedCell?.date === iso
+              const weekStart = dayToWeekStart[iso]
+              const isInHoveredWeek = hoveredWeek === weekStart
 
               return (
                 <button
                   key={iso}
                   onClick={() => onCellClick(emp.id, iso)}
+                  onMouseEnter={() => onHoverWeek(weekStart)}
+                  onMouseLeave={() => onHoverWeek(null)}
                   className={cn(
-                    'border-r border-gray-100 py-1 px-1 relative overflow-hidden transition-colors flex flex-col justify-center gap-0.5',
+                    'py-1 px-1 relative overflow-hidden transition-colors flex flex-col justify-center gap-0.5',
+                    isSunday ? 'border-r-2 border-r-gray-300' : 'border-r border-gray-100',
                     isW && 'bg-gray-50/30',
                     isTd && 'bg-indigo-50/40',
+                    isInHoveredWeek && !isSel && 'bg-indigo-50/40',
                     isSel && 'ring-2 ring-indigo-400 ring-inset z-10',
                     'hover:bg-indigo-50/60'
                   )}
@@ -353,15 +421,16 @@ function MonthGrid({ days, employees, employeeShifts, employeeMonthHours, absenc
   )
 }
 
-// ─── Chip de turno dentro de una celda ────────────────────────────────────
+// ─── Chip de turno dentro de una celda (estilo Skello: dos líneas verticales) ──
 function ShiftChip({ shift, shades, color }: { shift: EmployeeShift; shades: any; color: string }) {
-  const label = `${shift.startTime}–${shift.endTime}`
+  const total = `${fmtH(shift.totalMinutes / 60)}`
   return (
     <div
-      className="text-[9px] font-semibold rounded px-1 py-0.5 text-white leading-tight text-center truncate"
-      style={{ backgroundColor: color }}
-      title={`${label} · ${fmtH(shift.totalMinutes / 60)}`}>
-      {label}
+      className="rounded text-white leading-none px-0.5 py-0.5 flex flex-col items-center justify-center gap-0"
+      style={{ backgroundColor: color, minHeight: 30 }}
+      title={`${shift.startTime} – ${shift.endTime} · ${total}`}>
+      <span className="text-[10px] font-bold tabular-nums">{shift.startTime}</span>
+      <span className="text-[10px] font-bold tabular-nums opacity-90">{shift.endTime}</span>
     </div>
   )
 }
