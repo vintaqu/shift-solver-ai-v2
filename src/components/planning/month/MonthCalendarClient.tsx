@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { format, parseISO, isToday, isWeekend, addMonths, subMonths, startOfMonth, endOfMonth, eachDayOfInterval } from 'date-fns'
+import { format, parseISO, isToday, isWeekend, addMonths, subMonths, startOfMonth, endOfMonth, eachDayOfInterval, addDays } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { toast } from 'sonner'
 import {
@@ -14,6 +14,8 @@ import {
 import { cn } from '@/lib/utils'
 import { employeeColor, primaryRoleOf, colorShades } from '@/lib/employee-color'
 import { RoleExtraBadge } from '@/components/employees/RoleExtraBadge'
+import { createPlanningPeriodForWeek } from '@/server/actions/planningMonth'
+import { GenerateModal } from '@/components/planning/GenerateModal'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────
 interface EmployeeShift {
@@ -136,12 +138,15 @@ export function MonthCalendarClient({ year, month, data, organizationId, locatio
     return map
   }, [data.periods])
 
+  const [pendingWeekStart, setPendingWeekStart] = useState<string | null>(null)  // semana sin crear cuando abrimos modal
+
   function handleWeekClick(weekStart: string) {
     const periodId = weekStartToPeriodId[weekStart]
     if (periodId) {
       router.push(`/planning/week/${periodId}`)
     } else {
-      toast.info('No hay semana creada para estas fechas todavía')
+      // No existe la semana → abrir modal con opciones de creación
+      setPendingWeekStart(weekStart)
     }
   }
 
@@ -250,6 +255,16 @@ export function MonthCalendarClient({ year, month, data, organizationId, locatio
           />
         )}
       </div>
+
+      {/* Modal: qué hacer con una semana que no existe */}
+      {pendingWeekStart && (
+        <CreateWeekModal
+          weekStart={pendingWeekStart}
+          organizationId={organizationId}
+          locationId={locationId}
+          onClose={() => setPendingWeekStart(null)}
+        />
+      )}
     </div>
   )
 }
@@ -680,6 +695,111 @@ function DetailPanel({ selectedCell, employee, shifts, absence }: any) {
         className="w-full py-2 rounded-xl bg-indigo-600 text-white text-[12px] font-semibold hover:bg-indigo-700 transition-colors">
         Abrir vista diaria
       </button>
+    </div>
+  )
+}
+
+// ─── Modal: qué hacer con una semana vacía ─────────────────────────────────
+// Aparece al hacer clic en una semana del mensual que aún no tiene período.
+// Ofrece dos opciones: crear vacía (para editar a mano) o generar con solver.
+function CreateWeekModal({ weekStart, organizationId, locationId, onClose }: {
+  weekStart: string  // lunes ISO
+  organizationId: string
+  locationId: string
+  onClose: () => void
+}) {
+  const router = useRouter()
+  const [pending, setPending] = useState<'empty' | 'solver' | null>(null)
+  const [createdPeriodId, setCreatedPeriodId] = useState<string | null>(null)
+
+  const weekEnd = format(addDays(parseISO(weekStart), 6), 'd MMM yyyy', { locale: es })
+  const weekStartLabel = format(parseISO(weekStart), 'd MMM', { locale: es })
+  const weekLabel = `${weekStartLabel} – ${weekEnd}`
+
+  async function handleCreateEmpty() {
+    setPending('empty')
+    try {
+      const period = await createPlanningPeriodForWeek(organizationId, locationId, weekStart)
+      toast.success('Semana creada — abriendo vista semanal')
+      router.push(`/planning/week/${period.id}`)
+    } catch (e: any) {
+      toast.error(e.message ?? 'No se pudo crear la semana')
+      setPending(null)
+    }
+  }
+
+  async function handleCreateForSolver() {
+    setPending('solver')
+    try {
+      const period = await createPlanningPeriodForWeek(organizationId, locationId, weekStart)
+      // Abrir GenerateModal encima con el período recién creado
+      setCreatedPeriodId(period.id)
+    } catch (e: any) {
+      toast.error(e.message ?? 'No se pudo crear la semana')
+      setPending(null)
+    }
+  }
+
+  // Si ya hemos creado el período y toca abrir el solver, delegamos en GenerateModal.
+  // Al cerrar el solver, vamos a la vista semanal.
+  if (createdPeriodId) {
+    return (
+      <GenerateModal
+        planningPeriodId={createdPeriodId}
+        weekLabel={weekLabel}
+        hasExistingAssignments={false}
+        onClose={() => {
+          // Cerrar y navegar a la semanal (el usuario habrá generado o cancelado)
+          router.push(`/planning/week/${createdPeriodId}`)
+        }}
+      />
+    )
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-[3px]" />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-[440px] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="px-5 py-4 border-b border-gray-100" style={{ background: 'linear-gradient(135deg,#eef2ff,#f5f3ff)' }}>
+          <h3 className="text-[15px] font-bold text-gray-900">Semana del {weekLabel}</h3>
+          <p className="text-[11px] text-gray-500 mt-0.5">Aún no existe. Elige cómo quieres crearla:</p>
+        </div>
+
+        <div className="p-4 space-y-2">
+          <button
+            onClick={handleCreateEmpty}
+            disabled={pending !== null}
+            className="w-full flex items-start gap-3 p-4 rounded-xl border-2 border-gray-200 hover:border-indigo-300 hover:bg-indigo-50/30 transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed">
+            <div className="w-9 h-9 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0">
+              {pending === 'empty' ? <Loader2 size={16} className="animate-spin text-gray-500" /> : <Plus size={16} className="text-gray-500" />}
+            </div>
+            <div className="min-w-0">
+              <div className="text-[13px] font-bold text-gray-900">Crear vacía</div>
+              <div className="text-[11px] text-gray-500 mt-0.5">Semana en blanco para editarla turno a turno manualmente.</div>
+            </div>
+          </button>
+
+          <button
+            onClick={handleCreateForSolver}
+            disabled={pending !== null}
+            className="w-full flex items-start gap-3 p-4 rounded-xl border-2 border-indigo-200 bg-indigo-50/30 hover:border-indigo-400 hover:bg-indigo-50/60 transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed">
+            <div className="w-9 h-9 rounded-lg bg-indigo-100 flex items-center justify-center flex-shrink-0">
+              {pending === 'solver' ? <Loader2 size={16} className="animate-spin text-indigo-600" /> : <Sparkles size={16} className="text-indigo-600" />}
+            </div>
+            <div className="min-w-0">
+              <div className="text-[13px] font-bold text-indigo-700">Generar con solver</div>
+              <div className="text-[11px] text-indigo-600/80 mt-0.5">Crear y rellenar automáticamente a partir de la cobertura y los empleados disponibles.</div>
+            </div>
+          </button>
+        </div>
+
+        <div className="flex justify-end px-5 py-3 border-t border-gray-100 bg-gray-50/50">
+          <button onClick={onClose} disabled={pending !== null}
+            className="px-4 py-1.5 rounded-lg text-[12px] font-medium text-gray-600 hover:bg-white transition-colors disabled:opacity-50">
+            Cancelar
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

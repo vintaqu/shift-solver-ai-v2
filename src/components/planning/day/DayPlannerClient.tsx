@@ -265,7 +265,14 @@ export function DayPlannerClient({
               <Clock size={13} /> Día
             </button>
             <button
-              onClick={() => router.push('/planning')}
+              onClick={() => {
+                if (periodId) {
+                  router.push(`/planning/week/${periodId}`)
+                } else {
+                  // No hay semana creada para este día → mostrar el listado de semanas
+                  router.push('/planning')
+                }
+              }}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium text-gray-500 hover:text-gray-700 transition-colors"
             >
               <CalendarDays size={13} /> Semana
