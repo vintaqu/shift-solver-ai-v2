@@ -23,10 +23,25 @@ export default async function CoveragePage({ searchParams }: { searchParams: { w
   const weekStartISO = weekStart.toISOString().slice(0, 10)
 
   // Modelo "lienzo en blanco": cada semana parte vacía; el usuario pinta a mano.
-  const [slots, roles, skills] = await Promise.all([
+  const [slots, roles, skills, staff] = await Promise.all([
     getWeekCoverage(locationId, weekStartISO),
     prisma.laborRole.findMany({ where: { organizationId }, orderBy: { priority: 'asc' } }),
     prisma.skill.findMany({ where: { organizationId } }),
+    // Plantilla activa + contrato vigente — alimenta el KPI de capacidad semanal.
+    prisma.employee.findMany({
+      where: { organizationId, status: 'ACTIVE' as any },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        contracts: {
+          where: { isActive: true },
+          take: 1,
+          select: { weeklyHours: true, minWeeklyHours: true, maxWeeklyHours: true },
+        },
+      },
+      orderBy: [{ displayOrder: 'asc' }, { firstName: 'asc' }] as any,
+    }),
   ])
 
   return (
@@ -35,6 +50,7 @@ export default async function CoveragePage({ searchParams }: { searchParams: { w
       slots={JSON.parse(JSON.stringify(slots))}
       roles={JSON.parse(JSON.stringify(roles))}
       skills={JSON.parse(JSON.stringify(skills))}
+      staff={JSON.parse(JSON.stringify(staff))}
       locationId={locationId}
       organizationId={organizationId}
     />

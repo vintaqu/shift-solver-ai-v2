@@ -58,6 +58,19 @@ function splitIntoHalfHours(startTime: string, endTime: string): Array<{ start: 
   return out
 }
 
+// Duración de un slot en horas. "00:00" como fin = medianoche del día siguiente.
+function slotDurationHours(startTime: string, endTime: string): number {
+  const [sh, sm] = startTime.split(':').map(Number)
+  const [eh, em] = endTime === '00:00' ? [24, 0] : endTime.split(':').map(Number)
+  const mins = (eh * 60 + em) - (sh * 60 + sm)
+  return mins > 0 ? mins / 60 : 0
+}
+
+// "880,5 h" — formato español, sin decimales innecesarios.
+function fmtHours(h: number): string {
+  return `${h.toLocaleString('es-ES', { maximumFractionDigits: 1 })} h`
+}
+
 function demandColor(min: number): { bg: string; text: string; border: string; bar: string } {
   if (min === 0) return { bg: '#f9fafb', text: '#9ca3af', border: '#f3f4f6', bar: '#e5e7eb' }
   if (min === 1) return { bg: '#f0fdf4', text: '#166534', border: '#bbf7d0', bar: '#22c55e' }
@@ -203,6 +216,60 @@ interface Slot {
   roleRequirements?: any[]
 }
 
+// Panel de detalle que aparece al pasar el ratón sobre un KPI.
+// Usa position:fixed + getBoundingClientRect para escapar del overflow:hidden
+// del contenedor de la página.
+function HoverStat({ children, panel }: { children: React.ReactNode; panel: React.ReactNode }) {
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+  const ref = useRef<HTMLDivElement>(null)
+
+  function show() {
+    const r = ref.current?.getBoundingClientRect()
+    if (!r) return
+    const left = Math.max(8, Math.min(r.left, (typeof window !== 'undefined' ? window.innerWidth : 1200) - 320))
+    setPos({ top: r.bottom + 8, left })
+  }
+
+  return (
+    <div ref={ref} onMouseEnter={show} onMouseLeave={() => setPos(null)}
+      className="cursor-help border-b border-dashed border-gray-300 leading-none pb-1">
+      {children}
+      {pos && (
+        <div style={{ position: 'fixed', top: pos.top, left: pos.left, zIndex: 60 }}
+          className="w-[300px] bg-white rounded-2xl border border-gray-200 shadow-xl p-3.5 text-[12px] font-normal cursor-default">
+          {panel}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Fila etiqueta/valor dentro de un panel de detalle.
+function StatRow({ label, value, color, strong }: { label: string; value: string; color?: string; strong?: boolean }) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-1">
+      <span className="flex items-center gap-1.5 text-gray-500 min-w-0">
+        {color && <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />}
+        <span className="truncate">{label}</span>
+      </span>
+      <span className={cn('flex-shrink-0 tabular-nums', strong ? 'font-bold text-gray-900' : 'text-gray-700')}>{value}</span>
+    </div>
+  )
+}
+
+// Empleado activo con su contrato vigente — se usa solo para calcular la
+// capacidad semanal de la plantilla (KPI de horas).
+interface StaffMember {
+  id: string
+  firstName: string
+  lastName: string
+  contracts?: Array<{
+    weeklyHours: number
+    minWeeklyHours?: number | null
+    maxWeeklyHours?: number | null
+  }>
+}
+
 interface Props {
   weekStartISO: string
   slots: Slot[]
@@ -210,11 +277,13 @@ interface Props {
   skills: any[]
   locationId: string
   organizationId: string
+  staff?: StaffMember[]
 }
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 export function CoverageWeeklyClient({
   weekStartISO, slots: initialSlots, roles, skills, locationId, organizationId,
+  staff = [],
 }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
@@ -378,6 +447,90 @@ export function CoverageWeeklyClient({
     return { total: normalizedSlots.length, daysWithSlots, maxDemand, required }
   }, [normalizedSlots])
 
+  // ── Horas de cobertura necesarias ────────────────────────────────────────
+  // Cada slot aporta (personas × su duración). El desglose por rol usa
+  // roleRequirements; si un slot no lo tiene, cae en "Sin rol asignado".
+  const coverageHours = useMemo(() => {
+    let minHours = 0
+    let idealHours = 0
+    const byRole = new Map<string, { name: string; color: string; min: number; ideal: number }>()
+
+    for (const s of normalizedSlots) {
+      const dur = slotDurationHours(s.startTime, s.endTime)
+      if (dur === 0) continue
+      minHours += (s.minWorkers ?? 0) * dur
+      idealHours += (s.idealWorkers ?? s.minWorkers ?? 0) * dur
+
+      const rrs = ((s as any).roleRequirements ?? []) as any[]
+      if (rrs.length === 0) {
+        const prev = byRole.get('__none__') ?? { name: 'Sin rol asignado', color: '#9ca3af', min: 0, ideal: 0 }
+        prev.min += (s.minWorkers ?? 0) * dur
+        prev.ideal += (s.idealWorkers ?? s.minWorkers ?? 0) * dur
+        byRole.set('__none__', prev)
+        continue
+      }
+      for (const rr of rrs) {
+        const key = rr.laborRoleId ?? '__none__'
+        const prev = byRole.get(key) ?? { name: roleName(rr), color: roleColor(rr), min: 0, ideal: 0 }
+        prev.min += (rr.minWorkers ?? 0) * dur
+        prev.ideal += (rr.idealWorkers ?? rr.minWorkers ?? 0) * dur
+        byRole.set(key, prev)
+      }
+    }
+
+    const roleRows = Array.from(byRole.values()).sort((a, b) => b.min - a.min)
+    return { minHours, idealHours, roleRows }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [normalizedSlots, roleColorById, roleNameById])
+
+  // ── Capacidad semanal de la plantilla ────────────────────────────────────
+  // contracted = suma de horas de contrato. min/max = horquillas (el máximo
+  // marca el techo con horas extra). Sin horquilla se usa la hora contratada.
+  const capacity = useMemo(() => {
+    let contracted = 0
+    let minHours = 0
+    let maxHours = 0
+    let withContract = 0
+
+    for (const e of staff) {
+      const c = e.contracts?.[0]
+      if (!c) continue
+      withContract++
+      const w = c.weeklyHours ?? 0
+      contracted += w
+      minHours += c.minWeeklyHours ?? w
+      maxHours += c.maxWeeklyHours ?? w
+    }
+
+    return {
+      total: staff.length,
+      withContract,
+      withoutContract: staff.length - withContract,
+      contracted,
+      minHours,
+      maxHours,
+    }
+  }, [staff])
+
+  // ── Balance cobertura vs capacidad ───────────────────────────────────────
+  const balance = useMemo(() => {
+    const need = coverageHours.minHours
+    const diff = capacity.contracted - need
+    let status: 'empty' | 'ok' | 'extras' | 'deficit' = 'ok'
+    if (capacity.withContract === 0 || need === 0) status = 'empty'
+    else if (need > capacity.maxHours) status = 'deficit'
+    else if (need > capacity.contracted) status = 'extras'
+    return {
+      diff,
+      status,
+      // Horas extra necesarias por encima de lo contratado.
+      extraNeeded: Math.max(0, need - capacity.contracted),
+      // Horas que no se pueden cubrir ni con el máximo de la plantilla.
+      uncovered: Math.max(0, need - capacity.maxHours),
+      usagePct: capacity.contracted > 0 ? (need / capacity.contracted) * 100 : 0,
+    }
+  }, [coverageHours.minHours, capacity])
+
   function goToWeek(newWeekStartISO: string) {
     router.push(`/coverage?week=${newWeekStartISO}`)
   }
@@ -453,11 +606,83 @@ export function CoverageWeeklyClient({
       </div>
 
       {/* ── KPIs ── */}
-      <div className="flex-shrink-0 flex items-center gap-6 px-6 py-2.5 bg-white border-b border-gray-100 text-[12px]">
+      <div className="flex-shrink-0 flex items-center gap-5 px-6 py-2.5 bg-white border-b border-gray-100 text-[12px] flex-wrap">
         <span><strong className="text-indigo-600 text-[14px]">{kpis.total}</strong> <span className="text-gray-400">slots totales</span></span>
         <span><strong className="text-emerald-600 text-[14px]">{kpis.daysWithSlots}/7</strong> <span className="text-gray-400">días configurados</span></span>
         <span><strong className="text-amber-600 text-[14px]">{kpis.maxDemand}</strong> <span className="text-gray-400">demanda máxima</span></span>
         <span><strong className="text-red-500 text-[14px]">{kpis.required}</strong> <span className="text-gray-400">slots obligatorios</span></span>
+
+        <span className="w-px h-5 bg-gray-200" />
+
+        {/* Horas necesarias para cubrir toda la demanda de la semana */}
+        <HoverStat
+          panel={
+            <>
+              <div className="text-[11px] font-bold text-gray-700 uppercase tracking-wider mb-2">Horas de cobertura</div>
+              <StatRow label="Mínimo obligatorio" value={fmtHours(coverageHours.minHours)} strong />
+              <StatRow label="Ideal (con refuerzo)" value={fmtHours(coverageHours.idealHours)} />
+              {coverageHours.roleRows.length > 0 && (
+                <div className="mt-2 pt-2 border-t border-gray-100">
+                  <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1">Desglose por rol (mínimo)</div>
+                  {coverageHours.roleRows.map((r, i) => (
+                    <StatRow key={i} label={r.name} value={fmtHours(r.min)} color={r.color} />
+                  ))}
+                </div>
+              )}
+              <p className="mt-2 pt-2 border-t border-gray-100 text-[11px] text-gray-400 leading-snug">
+                Suma de personas × duración de cada slot de la semana.
+              </p>
+            </>
+          }
+        >
+          <span>
+            <strong className="text-violet-600 text-[14px]">{fmtHours(coverageHours.minHours)}</strong>{' '}
+            <span className="text-gray-400">de cobertura</span>
+          </span>
+        </HoverStat>
+
+        {/* Capacidad de la plantilla */}
+        <HoverStat
+          panel={
+            <>
+              <div className="text-[11px] font-bold text-gray-700 uppercase tracking-wider mb-2">Capacidad de la plantilla</div>
+              <StatRow label={`Empleados activos`} value={String(capacity.total)} />
+              <StatRow label="Horas mínimas (horquilla)" value={fmtHours(capacity.minHours)} />
+              <StatRow label="Horas contratadas" value={fmtHours(capacity.contracted)} strong />
+              <StatRow label="Horas máximas (con extras)" value={fmtHours(capacity.maxHours)} />
+              {capacity.withoutContract > 0 && (
+                <p className="mt-2 pt-2 border-t border-gray-100 text-[11px] text-amber-600 leading-snug">
+                  {capacity.withoutContract} empleado(s) sin contrato activo no cuentan en la capacidad.
+                </p>
+              )}
+              {capacity.withContract > 0 && (
+                <p className="mt-2 pt-2 border-t border-gray-100 text-[11px] text-gray-400 leading-snug">
+                  Ocupación de la plantilla: {Math.round(balance.usagePct)}% de las horas contratadas.
+                </p>
+              )}
+            </>
+          }
+        >
+          <span>
+            <strong className="text-sky-600 text-[14px]">{capacity.total}</strong>{' '}
+            <span className="text-gray-400">empleados ·</span>{' '}
+            <strong className="text-sky-600 text-[14px]">{fmtHours(capacity.contracted)}</strong>{' '}
+            <span className="text-gray-400">contratadas</span>
+          </span>
+        </HoverStat>
+
+        {/* Balance */}
+        {balance.status !== 'empty' && (
+          <span className={cn('ml-auto px-3 py-1 rounded-full text-[11px] font-semibold',
+            balance.status === 'ok' && 'bg-emerald-50 text-emerald-700',
+            balance.status === 'extras' && 'bg-amber-50 text-amber-700',
+            balance.status === 'deficit' && 'bg-red-50 text-red-700',
+          )}>
+            {balance.status === 'ok' && `Encaja · ${fmtHours(balance.diff)} de margen`}
+            {balance.status === 'extras' && `Necesitas ${fmtHours(balance.extraNeeded)} extra`}
+            {balance.status === 'deficit' && `Déficit de ${fmtHours(balance.uncovered)} — falta plantilla`}
+          </span>
+        )}
       </div>
 
       {/* ── Glosario de roles (colores) ── */}
