@@ -9,12 +9,19 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { upsertDateSlot, deleteDateSlot } from '@/server/actions/coverageWeekly'
-import { swapAssignments } from '@/server/actions/planning'
+import { swapAssignments, updateAssignment } from '@/server/actions/planning'
+import { ShiftEditorModal } from '@/components/planning/ShiftEditorModal'
+import type { ShiftEditorContext } from '@/types'
 import { RoleRequirementsEditor, initialRoleRows, type RoleRow } from '@/components/coverage/RoleRequirementsEditor'
 import { employeeColorShades, primaryRoleOf, DEFAULT_EMPLOYEE_COLOR } from '@/lib/employee-color'
 import { RoleExtraBadge } from '@/components/employees/RoleExtraBadge'
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
+// Granularidad del arrastre. 15 min encaja con los slots de cobertura (30 min)
+// y permite medias horas sin que el turno "baile" al mover el ratón.
+const SNAP_MIN = 15
+// Duración mínima de un turno al redimensionar.
+const MIN_SHIFT_MIN = 30
 const DAYS_FULL = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
 const MONTHS_ES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
 
@@ -208,6 +215,182 @@ export function DayPlannerClient({
 
   const pct = (m: number) => ((m - range.start) / totalMin) * 100
 
+  // ══════════ EDICIÓN INTERACTIVA DE TURNOS ══════════
+  // Los turnos se pueden mover (arrastrar el cuerpo), estirar (tiradores en los
+  // bordes) o abrir en el editor (click limpio, sin desplazamiento).
+  const [isPending, startTransition] = useTransition()
+  const [editor, setEditor] = useState<ShiftEditorContext>({ isOpen: false, mode: 'create' })
+
+  type DragState = {
+    id: string
+    mode: 'move' | 'start' | 'end'
+    originStart: number
+    originEnd: number
+    start: number
+    end: number
+    startX: number
+    pxPerMin: number
+    moved: boolean
+  }
+  const [drag, setDrag] = useState<DragState | null>(null)
+  const dragRef = useRef<DragState | null>(null)
+
+  // Solo se edita si la semana existe y no está publicada.
+  const editable = !!periodId && periodStatus !== 'PUBLISHED'
+  const dateObj = useMemo(() => new Date(dateISO + 'T00:00:00Z'), [dateISO])
+
+  function clamp(v: number, lo: number, hi: number) {
+    return Math.max(lo, Math.min(hi, v))
+  }
+
+  function openEditor(a: any) {
+    if (!editable) return
+    setEditor({
+      isOpen: true,
+      mode: 'edit',
+      assignmentId: a.id,
+      employeeId: a.employeeId,
+      dayIndex: 0,
+      initialValues: {
+        employeeId: a.employeeId,
+        date: dateObj,
+        startTime: a.startTime,
+        endTime: a.endTime,
+        breakMinutes: a.breakMinutes ?? 0,
+        laborRoleId: a.laborRoleId ?? undefined,
+        notes: a.notes ?? undefined,
+        isLocked: a.isLocked ?? false,
+        isSplit: a.isSplit ?? false,
+      },
+    })
+  }
+
+  function openCreator(employeeId: string, atMin: number) {
+    if (!editable) return
+    const start = clamp(Math.round(atMin / SNAP_MIN) * SNAP_MIN, range.start, range.end - 60)
+    const end = clamp(start + 4 * 60, start + MIN_SHIFT_MIN, range.end)
+    setEditor({
+      isOpen: true,
+      mode: 'create',
+      employeeId,
+      dayIndex: 0,
+      initialValues: {
+        employeeId,
+        date: dateObj,
+        startTime: minToTime(start),
+        endTime: minToTime(end),
+        breakMinutes: 20,
+        isLocked: false,
+        isSplit: false,
+      },
+    })
+  }
+
+  // Inicio del arrastre. El ancho real de la pista se mide en el momento
+  // (getBoundingClientRect) porque el layout es porcentual y responsive.
+  function beginDrag(e: React.PointerEvent, a: any, mode: DragState['mode']) {
+    if (!editable) return
+    if (a.isLocked) { toast.error('El turno está bloqueado'); return }
+    const track = (e.currentTarget as HTMLElement).closest('[data-day-track]') as HTMLElement | null
+    if (!track) return
+    const rect = track.getBoundingClientRect()
+    const pxPerMin = rect.width / totalMin
+    if (!pxPerMin || !isFinite(pxPerMin)) return
+    e.preventDefault()
+    e.stopPropagation()
+    const st: DragState = {
+      id: a.id,
+      mode,
+      originStart: timeToMin(a.startTime),
+      originEnd: endMin(a.endTime),
+      start: timeToMin(a.startTime),
+      end: endMin(a.endTime),
+      startX: e.clientX,
+      pxPerMin,
+      moved: false,
+    }
+    dragRef.current = st
+    setDrag(st)
+  }
+
+  const isDragging = drag !== null
+
+  useEffect(() => {
+    if (!isDragging) return
+
+    function onMove(ev: PointerEvent) {
+      const d = dragRef.current
+      if (!d) return
+      const deltaMin = Math.round(((ev.clientX - d.startX) / d.pxPerMin) / SNAP_MIN) * SNAP_MIN
+      let start = d.originStart
+      let end = d.originEnd
+      if (d.mode === 'move') {
+        const dur = d.originEnd - d.originStart
+        start = clamp(d.originStart + deltaMin, range.start, range.end - dur)
+        end = start + dur
+      } else if (d.mode === 'start') {
+        start = clamp(d.originStart + deltaMin, range.start, d.originEnd - MIN_SHIFT_MIN)
+      } else {
+        end = clamp(d.originEnd + deltaMin, d.originStart + MIN_SHIFT_MIN, range.end)
+      }
+      const next: DragState = {
+        ...d,
+        start,
+        end,
+        moved: d.moved || start !== d.originStart || end !== d.originEnd,
+      }
+      dragRef.current = next
+      setDrag(next)
+    }
+
+    function onUp() {
+      const d = dragRef.current
+      dragRef.current = null
+      setDrag(null)
+      if (!d) return
+      // Sin desplazamiento = click limpio → abrir el editor completo.
+      if (!d.moved) {
+        const a = allAssignments.find((x: any) => x.id === d.id)
+        if (a) openEditor(a)
+        return
+      }
+      const startTime = minToTime(d.start)
+      const endTime = minToTime(d.end)
+      startTransition(async () => {
+        try {
+          await updateAssignment(d.id, { startTime, endTime })
+          toast.success(`Turno actualizado · ${startTime} – ${endTime}`)
+          router.refresh()
+        } catch (err: any) {
+          toast.error(err?.message || 'No se pudo actualizar el turno')
+          router.refresh()
+        }
+      })
+    }
+
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
+    return () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDragging, range.start, range.end, totalMin, allAssignments])
+
+  // Cursor global mientras se arrastra, para que no parpadee al salir de la barra.
+  useEffect(() => {
+    if (!isDragging) return
+    const prev = document.body.style.cursor
+    document.body.style.cursor = drag?.mode === 'move' ? 'grabbing' : 'ew-resize'
+    document.body.style.userSelect = 'none'
+    return () => {
+      document.body.style.cursor = prev
+      document.body.style.userSelect = ''
+    }
+  }, [isDragging, drag?.mode])
+
   const dowOfDate = (new Date(dateISO + 'T00:00:00Z').getUTCDay() + 6) % 7
 
   const ABSENCE_CFG: Record<string, { label: string; bg: string; text: string; icon: string }> = {
@@ -340,7 +523,17 @@ export function DayPlannerClient({
             <span className="w-3 h-3 rounded-sm bg-indigo-200 inline-block" /> Exceso
           </span>
           <span className="text-gray-300">·</span>
-          <span className="text-gray-400">Click en una barra para editar cobertura</span>
+          {isPending ? (
+            <span className="flex items-center gap-1.5 text-indigo-600 font-medium">
+              <Loader2 size={12} className="animate-spin" /> Guardando…
+            </span>
+          ) : (
+            <span className="text-gray-400">
+              {editable
+                ? 'Arrastra los turnos para moverlos · tira de los bordes para alargarlos · click para editar'
+                : 'Click en una barra para editar cobertura'}
+            </span>
+          )}
         </div>
       </div>
 
@@ -470,8 +663,20 @@ export function DayPlannerClient({
                     {totalH > 0 ? `${Math.floor(totalH / 60)}h${totalH % 60 ? String(totalH % 60).padStart(2, '0') : ''}` : '—'}
                   </div>
                 </div>
-                {/* Área de barras */}
-                <div className="flex-1 relative h-[46px]">
+                {/* Área de barras — pista de referencia para medir el arrastre */}
+                <div
+                  data-day-track
+                  className={cn('flex-1 relative h-[46px]', editable && 'cursor-copy')}
+                  onClick={ev => {
+                    // Click en hueco vacío → crear turno empezando a esa hora.
+                    if (!editable || drag) return
+                    if ((ev.target as HTMLElement).closest('[data-shift-bar]')) return
+                    const rect = (ev.currentTarget as HTMLElement).getBoundingClientRect()
+                    if (!rect.width) return
+                    const atMin = range.start + ((ev.clientX - rect.left) / rect.width) * totalMin
+                    openCreator(emp.id, atMin)
+                  }}
+                >
                   {hours.map(m => (
                     <div key={m} className="absolute top-0 bottom-0 w-px bg-gray-50" style={{ left: `${pct(m)}%` }} />
                   ))}
@@ -507,23 +712,59 @@ export function DayPlannerClient({
                     )
                   })()}
                   {empShifts.map((a: any) => {
-                    const s = timeToMin(a.startTime)
-                    const e = endMin(a.endTime)
+                    // Mientras se arrastra este turno se pinta la posición
+                    // provisional, no la guardada — feedback inmediato.
+                    const dragging = drag?.id === a.id
+                    const s = dragging ? drag!.start : timeToMin(a.startTime)
+                    const e = dragging ? drag!.end : endMin(a.endTime)
                     const left = pct(Math.max(s, range.start))
                     const width = pct(Math.min(e, range.end)) - left
+                    const label = `${minToTime(s)} – ${minToTime(e)}`
+                    const locked = !!a.isLocked
+                    const canEdit = editable && !locked
                     return (
                       <div key={a.id}
-                        className="absolute top-[7px] bottom-[7px] rounded-lg border-l-4 px-2 flex items-center gap-2 overflow-hidden shadow-sm"
+                        data-shift-bar
+                        onPointerDown={ev => beginDrag(ev, a, 'move')}
+                        className={cn(
+                          'absolute top-[7px] bottom-[7px] rounded-lg border-l-4 px-2 flex items-center gap-2 overflow-hidden shadow-sm group/shift',
+                          canEdit && 'cursor-grab hover:shadow-md hover:brightness-[0.98] transition-shadow',
+                          locked && 'cursor-not-allowed',
+                          dragging && 'shadow-lg ring-2 ring-indigo-400 z-20 cursor-grabbing',
+                        )}
                         style={{ left: `${left}%`, width: `${width}%`, backgroundColor: col.bg, borderLeftColor: col.dot }}
-                        title={`${a.startTime} – ${a.endTime}${a.breakMinutes ? ` · ${a.breakMinutes}m descanso` : ''}`}
+                        title={canEdit
+                          ? `${label}${a.breakMinutes ? ` · ${a.breakMinutes}m descanso` : ''} — arrastra para mover, tira de los bordes para alargar, click para editar`
+                          : `${label}${locked ? ' · bloqueado' : ''}`}
                       >
-                        <span className="text-[11px] font-bold whitespace-nowrap" style={{ color: col.text }}>
-                          {a.startTime} – {a.endTime}
+                        {/* Tirador izquierdo */}
+                        {canEdit && (
+                          <div
+                            onPointerDown={ev => beginDrag(ev, a, 'start')}
+                            className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize z-10 flex items-center justify-center opacity-0 group-hover/shift:opacity-100 transition-opacity"
+                          >
+                            <span className="w-[3px] h-3 rounded-full bg-white/80 shadow" />
+                          </div>
+                        )}
+
+                        <span className="text-[11px] font-bold whitespace-nowrap pointer-events-none" style={{ color: col.text }}>
+                          {label}
                         </span>
-                        {a.breakMinutes > 0 && (
-                          <span className="text-[9px] opacity-60 whitespace-nowrap" style={{ color: col.text }}>
+                        {locked && <span className="text-[9px] pointer-events-none">🔒</span>}
+                        {a.breakMinutes > 0 && !dragging && (
+                          <span className="text-[9px] opacity-60 whitespace-nowrap pointer-events-none" style={{ color: col.text }}>
                             {a.breakMinutes}m desc.
                           </span>
+                        )}
+
+                        {/* Tirador derecho */}
+                        {canEdit && (
+                          <div
+                            onPointerDown={ev => beginDrag(ev, a, 'end')}
+                            className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize z-10 flex items-center justify-center opacity-0 group-hover/shift:opacity-100 transition-opacity"
+                          >
+                            <span className="w-[3px] h-3 rounded-full bg-white/80 shadow" />
+                          </div>
                         )}
                       </div>
                     )
@@ -574,6 +815,17 @@ export function DayPlannerClient({
       </div>
 
       {/* ── Modal intercambio de turnos del día ── */}
+      {/* Editor de turno — click sobre una barra (o sobre hueco vacío para crear) */}
+      {editor.isOpen && periodId && (
+        <ShiftEditorModal
+          context={editor}
+          planningPeriodId={periodId}
+          employees={allEmployees as any}
+          weekDays={[dateObj]}
+          onClose={() => { setEditor({ isOpen: false, mode: 'create' }); router.refresh() }}
+        />
+      )}
+
       {showSwapModal && periodId && (
         <SwapModal
           scope="day"
