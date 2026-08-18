@@ -176,13 +176,48 @@ export function MonthCalendarClient({ year, month, data, organizationId, locatio
     router.push(`/planning/month/${now.getFullYear()}/${now.getMonth() + 1}`)
   }
 
+  // Fecha de referencia al cambiar de vista: hoy si cae dentro del mes visible,
+  // si no el día 1 — así el usuario aterriza siempre en el mes que estaba mirando.
+  function referenceDate(): Date {
+    const now = new Date()
+    if (now.getFullYear() === year && now.getMonth() + 1 === month) return now
+    return new Date(year, month - 1, 1)
+  }
+
+  function goToDayView() {
+    router.push(`/planning/day/${format(referenceDate(), 'yyyy-MM-dd')}`)
+  }
+
+  // Reutiliza handleWeekClick: si la semana no tiene cuadrante creado, abre el
+  // modal de creación en lugar de romper la navegación.
+  function goToWeekView() {
+    const ref = referenceDate()
+    const dow = (ref.getDay() + 6) % 7 // 0 = lunes
+    const monday = new Date(ref.getFullYear(), ref.getMonth(), ref.getDate() - dow)
+    handleWeekClick(format(monday, 'yyyy-MM-dd'))
+  }
+
   return (
     <div className="flex flex-col h-[calc(100vh-52px)] overflow-hidden bg-[#F7F8FA]">
       {/* ── Header ── */}
       <div className="flex-shrink-0 bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
-        <div>
-          <h1 className="text-[17px] font-bold text-gray-900">Cuadrante mensual</h1>
-          <p className="text-[12px] text-gray-400">Vista general por empleado</p>
+        {/* Tabs de temporalidad — mismo patrón que el planificador semanal */}
+        <div className="flex items-center bg-gray-100 rounded-xl p-1 border border-gray-200">
+          <button
+            onClick={goToDayView}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium text-gray-500 hover:text-gray-700 transition-colors"
+          >
+            <span className="text-[12px]">🕐</span> Día
+          </button>
+          <button
+            onClick={goToWeekView}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium text-gray-500 hover:text-gray-700 transition-colors"
+          >
+            <span className="text-[12px]">📆</span> Semana
+          </button>
+          <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold bg-white text-indigo-600 shadow-sm">
+            <span className="text-[12px]">📅</span> Mes
+          </button>
         </div>
 
         <div className="flex items-center gap-4">
