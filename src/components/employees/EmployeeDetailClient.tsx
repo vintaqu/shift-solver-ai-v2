@@ -173,6 +173,7 @@ export function EmployeeDetailClient({ employee: emp, skills: allSkills, roles: 
                 { label: 'Email', value: emp.email || '—' },
                 { label: 'Teléfono', value: emp.phone || '—' },
                 { label: 'Fecha de alta', value: emp.hireDate ? new Date(emp.hireDate).toLocaleDateString('es-ES') : '—' },
+                { label: 'Fecha de baja', value: (emp as any).terminationDate ? new Date((emp as any).terminationDate).toLocaleDateString('es-ES') : '—' },
                 { label: 'Estado', value: (emp as any).status === 'ACTIVE' ? '✅ Activo' : (emp as any).status === 'INACTIVE' ? '⏸️ Inactivo' : '🗄️ Archivado' },
               ]} />
               {emp.notes && (
@@ -960,6 +961,7 @@ function EditInfoModal({ emp, onClose, onSaved }: any) {
     email: emp.email || '',
     phone: emp.phone || '',
     hireDate: emp.hireDate ? new Date(emp.hireDate).toISOString().split('T')[0] : '',
+    terminationDate: emp.terminationDate ? new Date(emp.terminationDate).toISOString().split('T')[0] : '',
     notes: emp.notes || '',
   })
 
@@ -986,6 +988,14 @@ function EditInfoModal({ emp, onClose, onSaved }: any) {
           <Field label="Teléfono"><input className={inputCls()} value={form.phone} onChange={e => setForm((f: any) => ({ ...f, phone: e.target.value }))} /></Field>
           <Field label="Fecha alta"><input type="date" className={inputCls()} value={form.hireDate} onChange={e => setForm((f: any) => ({ ...f, hireDate: e.target.value }))} /></Field>
         </div>
+        <Field label="Fecha de baja">
+          <input type="date" className={inputCls()} value={form.terminationDate}
+            onChange={e => setForm((f: any) => ({ ...f, terminationDate: e.target.value }))} />
+          <p className="mt-1 text-[11px] text-gray-400">
+            Déjalo vacío si sigue de alta. Fuera de este rango el empleado no cuenta en cobertura,
+            no se le pueden asignar turnos y el solver lo ignora — pero su histórico se conserva.
+          </p>
+        </Field>
         <Field label="Notas internas"><textarea className={inputCls() + ' resize-none h-20'} value={form.notes} onChange={e => setForm((f: any) => ({ ...f, notes: e.target.value }))} placeholder="Observaciones sobre el empleado..." /></Field>
       </div>
       <ModalFooter onClose={onClose} onSave={() => startTransition(async () => {

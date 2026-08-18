@@ -34,12 +34,14 @@ export default async function CoveragePage({ searchParams }: { searchParams: { w
         id: true,
         firstName: true,
         lastName: true,
+        hireDate: true,
+        terminationDate: true,
         contracts: {
           where: { isActive: true },
           take: 1,
           select: { weeklyHours: true, minWeeklyHours: true, maxWeeklyHours: true },
         },
-      },
+      } as any,
       orderBy: [{ displayOrder: 'asc' }, { firstName: 'asc' }] as any,
     }),
   ])

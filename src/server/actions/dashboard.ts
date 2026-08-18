@@ -40,9 +40,16 @@ export async function getDashboardData(organizationId: string, locationId: strin
     coverageSlots,
     recentAuditLogs,
   ] = await Promise.all([
-    // Empleados activos con contratos
+    // Empleados activos con contratos, de alta a día de hoy
     prisma.employee.findMany({
-      where: { organizationId, status: 'ACTIVE' as any },
+      where: {
+        organizationId,
+        status: 'ACTIVE' as any,
+        AND: [
+          { OR: [{ hireDate: null }, { hireDate: { lte: todayEnd } }] },
+          { OR: [{ terminationDate: null }, { terminationDate: { gte: todayStart } }] },
+        ],
+      } as any,
       include: {
         contracts: { where: { isActive: true }, take: 1 },
         skills: { include: { laborRole: true } },

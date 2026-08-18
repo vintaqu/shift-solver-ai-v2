@@ -15,6 +15,7 @@ export async function upsertEmployee(data: {
   phone?: string
   color?: string
   hireDate?: string
+  terminationDate?: string
   notes?: string
   isActive?: boolean
   status?: 'ACTIVE' | 'INACTIVE' | 'ARCHIVED'
@@ -30,6 +31,7 @@ export async function upsertEmployee(data: {
     // persiste si viene explícitamente; si no, la columna usa su @default.
     ...(data.color ? { color: data.color } : {}),
     hireDate: data.hireDate ? new Date(data.hireDate) : null,
+    terminationDate: data.terminationDate ? new Date(data.terminationDate) : null,
     notes: data.notes?.trim() || null,
     // Compatibilidad hacia atrás: si algún caller sigue enviando isActive,
     // lo traducimos al enum. `status` toma precedencia si viene.
@@ -37,8 +39,8 @@ export async function upsertEmployee(data: {
   }
 
   const emp = data.id
-    ? await prisma.employee.update({ where: { id: data.id }, data: payload })
-    : await prisma.employee.create({ data: payload })
+    ? await prisma.employee.update({ where: { id: data.id }, data: payload as any })
+    : await prisma.employee.create({ data: payload as any })
 
   revalidatePath('/employees')
   revalidatePath(`/employees/${emp.id}`)
@@ -46,10 +48,24 @@ export async function upsertEmployee(data: {
 }
 
 // ── Estado del empleado (flujo lineal: ACTIVE → INACTIVE → ARCHIVED) ─────────
-export async function setEmployeeStatus(id: string, status: 'ACTIVE' | 'INACTIVE' | 'ARCHIVED') {
+export async function setEmployeeStatus(
+  id: string,
+  status: 'ACTIVE' | 'INACTIVE' | 'ARCHIVED',
+  terminationDate?: string | null,
+) {
+  // Al pasar a INACTIVE se registra la fecha de baja (hoy si no se indica otra),
+  // para que el histórico de cuadrantes y métricas siga siendo correcto.
+  // Al reactivar se limpia.
+  const data: any = { status }
+  if (status === 'INACTIVE') {
+    data.terminationDate = terminationDate ? new Date(terminationDate) : new Date()
+  } else if (status === 'ACTIVE') {
+    data.terminationDate = null
+  }
+
   const updated = await (prisma.employee.update as any)({
     where: { id },
-    data: { status },
+    data,
   })
   revalidatePath('/employees')
   revalidatePath(`/employees/${id}`)

@@ -18,6 +18,7 @@ import { updateEmployeeOrder } from '@/server/actions/employees'
 import { upsertDateSlot, deleteDateSlot } from '@/server/actions/coverageWeekly'
 import { RoleRequirementsEditor, initialRoleRows, type RoleRow } from '@/components/coverage/RoleRequirementsEditor'
 import { employeeColorShades } from '@/lib/employee-color'
+import { employmentBlockForDay, employmentBlockLabel, isEmployeeActiveInRange, type EmploymentBlock } from '@/lib/employees/activePeriod'
 import { RoleExtraBadge } from '@/components/employees/RoleExtraBadge'
 import { GenerateModal } from './GenerateModal'
 
@@ -171,6 +172,13 @@ export function PlannerClientPage({ period, employees: allEmployees, weekDays, a
       const end = parseISO(a.endDate)
       return dayDate >= start && dayDate <= end
     }) || null
+  }
+
+  // Día fuera del periodo de alta del empleado (antes del alta o tras la baja).
+  // Es un bloqueo duro: no tiene sentido asignar un turno a quien no estaba
+  // contratado ese día, así que la celda no es clicable.
+  function getEmploymentBlockForDay(emp: any, dayIndex: number): EmploymentBlock {
+    return employmentBlockForDay(emp, dateISOForDay(dayIndex))
   }
 
   // Asignar color fijo por empleado
@@ -572,12 +580,21 @@ export function PlannerClientPage({ period, employees: allEmployees, weekDays, a
                         today && 'bg-indigo-50/30',
                         dragOverCell?.empId === emp.id && dragOverCell?.dayIdx === dayIdx && draggedAssignment && 'bg-indigo-100/60 ring-2 ring-inset ring-indigo-400'
                       )}
-                      onDragOver={e => { e.preventDefault(); setDragOverCell({ empId: emp.id, dayIdx }) }}
+                      onDragOver={e => {
+                        // No se puede soltar un turno fuera del periodo de alta.
+                        if (getEmploymentBlockForDay(emp, dayIdx)) return
+                        e.preventDefault(); setDragOverCell({ empId: emp.id, dayIdx })
+                      }}
                       onDragLeave={() => setDragOverCell(null)}
                       onDrop={e => {
                         e.preventDefault()
                         setDragOverCell(null)
                         if (!draggedAssignment) return
+                        if (getEmploymentBlockForDay(emp, dayIdx)) {
+                          setDraggedAssignment(null)
+                          toast.error('El empleado no estaba de alta ese día')
+                          return
+                        }
                         const { id: assignmentId, empId: fromEmpId, dayIdx: fromDayIdx } = draggedAssignment
                         if (fromEmpId === emp.id && fromDayIdx === dayIdx) return
                         setDraggedAssignment(null)
@@ -597,8 +614,26 @@ export function PlannerClientPage({ period, employees: allEmployees, weekDays, a
                     {dayAssignments.length === 0 ? (
                         <div className="relative w-full h-full min-h-[56px]">
                           {(() => {
-                            const absence = getAbsenceForDay(emp.id, dayIdx)
-                            const unavail = !absence ? getUnavailabilityForDay(emp, dayIdx) : null
+                            const employmentBlock = getEmploymentBlockForDay(emp, dayIdx)
+                            const absence = !employmentBlock ? getAbsenceForDay(emp.id, dayIdx) : null
+                            const unavail = !employmentBlock && !absence ? getUnavailabilityForDay(emp, dayIdx) : null
+
+                            // Zona bloqueada por PERIODO DE ALTA — bloqueo duro, no clicable
+                            if (employmentBlock) {
+                              const cfg = employmentBlock === 'BEFORE_HIRE'
+                                ? { label: 'Sin alta', icon: '🔒', title: 'Anterior a la fecha de alta del empleado' }
+                                : { label: 'De baja', icon: '🔒', title: 'Posterior a la fecha de baja del empleado' }
+                              return (
+                                <div
+                                  title={cfg.title}
+                                  className="absolute inset-0 rounded-lg flex flex-col items-center justify-center gap-0.5 border border-gray-200 cursor-not-allowed select-none"
+                                  style={{ background: 'repeating-linear-gradient(45deg, #f8fafc, #f8fafc 5px, #e2e8f0 5px, #e2e8f0 10px)' }}
+                                >
+                                  <span className="text-[12px] opacity-50">{cfg.icon}</span>
+                                  <span className="text-[9px] font-bold text-gray-400">{cfg.label}</span>
+                                </div>
+                              )
+                            }
 
                             // Zona bloqueada por AUSENCIA — visible pero editable manualmente
                             if (absence) {
@@ -661,6 +696,18 @@ export function PlannerClientPage({ period, employees: allEmployees, weekDays, a
                       ) : (
                         <div className="space-y-1">
                           {/* Badge de ausencia sobre turno existente */}
+                          {(() => {
+                            const eb = getEmploymentBlockForDay(emp, dayIdx)
+                            if (!eb) return null
+                            return (
+                              <div className="flex items-center gap-1 px-1.5 py-1 rounded-lg mb-0.5 border bg-gray-100 border-gray-300">
+                                <span className="text-[10px]">🔒</span>
+                                <span className="text-[9px] font-bold text-gray-500">
+                                  {eb === 'BEFORE_HIRE' ? 'Sin alta' : 'De baja'} — ⚠️ tiene turno
+                                </span>
+                              </div>
+                            )
+                          })()}
                           {(() => {
                             const absence = getAbsenceForDay(emp.id, dayIdx)
                             if (!absence) return null

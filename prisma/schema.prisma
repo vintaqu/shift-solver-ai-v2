@@ -227,6 +227,7 @@ model Employee {
   color          String   @default("#6366f1") // color en cuadrante
   status         EmployeeStatus @default(ACTIVE)
   hireDate       DateTime?
+  terminationDate DateTime?  // fecha de baja; null = sigue de alta
   notes                String?
   vacationDaysType     String   @default("NATURALES")
   vacationDaysPerYear  Int      @default(23)

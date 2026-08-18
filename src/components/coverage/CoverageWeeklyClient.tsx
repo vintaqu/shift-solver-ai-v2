@@ -14,6 +14,7 @@ import {
   copyWeeksCoverage,
 } from '@/server/actions/coverageWeekly'
 import { RoleRequirementsEditor, initialRoleRows, sortRoles, type RoleRow } from './RoleRequirementsEditor'
+import { isEmployeeActiveInRange } from '@/lib/employees/activePeriod'
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 const DAYS_SHORT = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
@@ -263,6 +264,8 @@ interface StaffMember {
   id: string
   firstName: string
   lastName: string
+  hireDate?: string | Date | null
+  terminationDate?: string | Date | null
   contracts?: Array<{
     weeklyHours: number
     minWeeklyHours?: number | null
@@ -484,15 +487,20 @@ export function CoverageWeeklyClient({
   }, [normalizedSlots, roleColorById, roleNameById])
 
   // ── Capacidad semanal de la plantilla ────────────────────────────────────
-  // contracted = suma de horas de contrato. min/max = horquillas (el máximo
-  // marca el techo con horas extra). Sin horquilla se usa la hora contratada.
+  // Solo cuentan los empleados de alta durante esta semana (al menos un día).
+  // Regla acordada: si trabaja aunque sea un día, suma sus horas semanales
+  // completas — no se prorratea.
   const capacity = useMemo(() => {
+    const weekEndISO = addDaysISO(weekStartISO, 6)
+    const inWeek = staff.filter(e => isEmployeeActiveInRange(e, weekStartISO, weekEndISO))
+    const excluded = staff.length - inWeek.length
+
     let contracted = 0
     let minHours = 0
     let maxHours = 0
     let withContract = 0
 
-    for (const e of staff) {
+    for (const e of inWeek) {
       const c = e.contracts?.[0]
       if (!c) continue
       withContract++
@@ -503,14 +511,15 @@ export function CoverageWeeklyClient({
     }
 
     return {
-      total: staff.length,
+      total: inWeek.length,
+      excluded,
       withContract,
-      withoutContract: staff.length - withContract,
+      withoutContract: inWeek.length - withContract,
       contracted,
       minHours,
       maxHours,
     }
-  }, [staff])
+  }, [staff, weekStartISO])
 
   // ── Balance cobertura vs capacidad ───────────────────────────────────────
   const balance = useMemo(() => {
@@ -646,10 +655,15 @@ export function CoverageWeeklyClient({
           panel={
             <>
               <div className="text-[11px] font-bold text-gray-700 uppercase tracking-wider mb-2">Capacidad de la plantilla</div>
-              <StatRow label={`Empleados activos`} value={String(capacity.total)} />
+              <StatRow label="Empleados de alta esta semana" value={String(capacity.total)} />
               <StatRow label="Horas mínimas (horquilla)" value={fmtHours(capacity.minHours)} />
               <StatRow label="Horas contratadas" value={fmtHours(capacity.contracted)} strong />
               <StatRow label="Horas máximas (con extras)" value={fmtHours(capacity.maxHours)} />
+              {capacity.excluded > 0 && (
+                <p className="mt-2 pt-2 border-t border-gray-100 text-[11px] text-gray-400 leading-snug">
+                  {capacity.excluded} empleado(s) fuera de su periodo de alta esta semana (no cuentan).
+                </p>
+              )}
               {capacity.withoutContract > 0 && (
                 <p className="mt-2 pt-2 border-t border-gray-100 text-[11px] text-amber-600 leading-snug">
                   {capacity.withoutContract} empleado(s) sin contrato activo no cuentan en la capacidad.

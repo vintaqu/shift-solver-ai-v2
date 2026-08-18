@@ -67,12 +67,22 @@ export async function getMonthData(
 
     // Empleados activos para métricas
     prisma.employee.findMany({
-      where: { organizationId, status: 'ACTIVE' as any },
+      where: {
+        organizationId,
+        status: 'ACTIVE' as any,
+        // Solo los que estuvieron de alta en algún momento del mes visible.
+        AND: [
+          { OR: [{ hireDate: null }, { hireDate: { lte: monthEnd } }] },
+          { OR: [{ terminationDate: null }, { terminationDate: { gte: monthStart } }] },
+        ],
+      } as any,
       select: {
         id: true,
         firstName: true,
         lastName: true,
         color: true,
+        hireDate: true,
+        terminationDate: true,
         skills: {
           include: {
             laborRole: { select: { id: true, name: true, color: true, level: true, priority: true } },

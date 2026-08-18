@@ -7,6 +7,7 @@ import { callSolverApi, checkSolverHealth, SolverError, type ScheduleResponse } 
 import { buildScheduleRequest, mapResponseToAssignments, extractIssuesFromResponse } from '@/lib/scheduler/mapper'
 import { getWeekCoverage } from '@/server/actions/coverageWeekly'
 import { getAbsenceBlocksForWeek } from '@/server/actions/absences'
+import { isEmployeeActiveInRange, isEmployeeActiveOn } from '@/lib/employees/activePeriod'
 
 // ── Tipos públicos ─────────────────────────────────────────────────────────
 
@@ -59,7 +60,7 @@ export async function generateSchedule(
   const coverageSlots = await getWeekCoverage(period.locationId, weekStartISO)
 
   // 2. Cargar empleados activos con todo lo necesario
-  const employees = await prisma.employee.findMany({
+  const allEmployees = await prisma.employee.findMany({
     where: { organizationId: period.organizationId, status: 'ACTIVE' as any },
     include: {
       contracts: { where: { isActive: true }, orderBy: { startDate: 'desc' }, take: 1 },
@@ -68,10 +69,18 @@ export async function generateSchedule(
     },
   })
 
+  // Solo entran al solver los que estuvieron de alta algún día de esta semana.
+  const weekStartDate = new Date(period.weekStart)
+  const weekEndISO = addDays(weekStartDate, 6).toISOString().slice(0, 10)
+  const employees = allEmployees.filter(e =>
+    isEmployeeActiveInRange(e as any, weekStartISO, weekEndISO))
+
   if (employees.length === 0) {
     return {
       success: false,
-      error: 'No hay empleados activos configurados',
+      error: allEmployees.length > 0
+        ? 'Ningún empleado está de alta durante esta semana'
+        : 'No hay empleados activos configurados',
       errorCode: 'NO_EMPLOYEES',
     }
   }
@@ -92,6 +101,21 @@ export async function generateSchedule(
     weekStart,
     weekEnd,
   )
+
+  // 3b. Los días fuera del periodo de alta se inyectan como días libres, igual
+  // que las ausencias. Cubre las altas/bajas a mitad de semana: el empleado
+  // entra al solver pero solo se le pueden asignar los días que sí trabaja.
+  const DIAS_SOLVER_GEN = ['LUNES', 'MARTES', 'MIERCOLES', 'JUEVES', 'VIERNES', 'SABADO', 'DOMINGO']
+  for (const emp of employees) {
+    const solverName = `${emp.firstName.toUpperCase()} ${emp.lastName.toUpperCase()}`
+    for (let i = 0; i < 7; i++) {
+      const dayISO = addDays(weekStartDate, i).toISOString().slice(0, 10)
+      if (isEmployeeActiveOn(emp as any, dayISO)) continue
+      const dia = DIAS_SOLVER_GEN[i]
+      if (!absenceBlocks[solverName]) absenceBlocks[solverName] = []
+      if (!absenceBlocks[solverName].includes(dia)) absenceBlocks[solverName].push(dia)
+    }
+  }
 
   // 4. Construir el payload para el solver (con ausencias como días_libres)
   const payload = buildScheduleRequest(
