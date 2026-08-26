@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
@@ -14,7 +14,8 @@ import { employeeColor, primaryRoleOf } from '@/lib/employee-color'
 import { RoleExtraBadge } from './RoleExtraBadge'
 import {
   upsertEmployee, upsertContract, setEmployeeSkills,
-  upsertAvailability, deleteAvailability, setEmployeeStatus
+  upsertAvailability, deleteAvailability, setEmployeeStatus,
+  deleteEmployee, getEmployeeDeletionImpact
 } from '@/server/actions/employees'
 import { updateEmployeeVacationConfig } from '@/server/actions/absences'
 import { setEmployeePin, removeEmployeePin, getEmployeeLoginLink } from '@/server/actions/auth'
@@ -65,6 +66,7 @@ function Field({ label, hint, error, children }: any) {
 // ═══════════════════════════════════════════════════════════════════════════════
 export function EmployeeDetailClient({ employee: emp, skills: allSkills, roles: allRoles, legalFrameworks = [], onUpdated }: any) {
   const router = useRouter()
+  const [showDelete, setShowDelete] = useState(false)
   const [tab, setTab] = useState<'info' | 'contract' | 'roles' | 'restrictions' | 'history'>('info')
   const [editInfo, setEditInfo] = useState(false)
   const [editContract, setEditContract] = useState(false)
@@ -126,6 +128,13 @@ export function EmployeeDetailClient({ employee: emp, skills: allSkills, roles: 
 
           {/* Acciones header */}
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowDelete(true)}
+              title="Borrar empleado definitivamente"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-red-200 bg-white text-red-600 text-[13px] font-medium hover:bg-red-50 transition-colors"
+            >
+              <Trash2 size={14} /> Borrar
+            </button>
             <StatusSelector
               currentStatus={(emp as any).status ?? 'ACTIVE'}
               onSelect={async (s: string) => {
@@ -488,6 +497,22 @@ export function EmployeeDetailClient({ employee: emp, skills: allSkills, roles: 
       </div>
 
       {/* ══ MODALES ══ */}
+
+      {showDelete && (
+        <DeleteEmployeeModal
+          emp={emp}
+          onClose={() => setShowDelete(false)}
+          onArchive={() => {
+            startTransition(async () => {
+              await setEmployeeStatus(emp.id, 'ARCHIVED' as any)
+              toast.success('Empleado archivado')
+              setShowDelete(false)
+              router.refresh()
+            })
+          }}
+          onDeleted={() => router.push('/employees')}
+        />
+      )}
 
       {editInfo && (
         <EditInfoModal
@@ -1479,6 +1504,157 @@ function StatusSelector({ currentStatus, onSelect }: { currentStatus: string; on
           })}
         </div>
       )}
+    </div>
+  )
+}
+
+// ─── Modal de borrado definitivo ──────────────────────────────────────────────
+// Doble barrera: primero se enseña el histórico real que se va a destruir, y
+// después hay que escribir el nombre completo para habilitar el botón. Es
+// deliberadamente incómodo porque la acción no tiene vuelta atrás.
+function DeleteEmployeeModal({
+  emp, onClose, onArchive, onDeleted,
+}: {
+  emp: any
+  onClose: () => void
+  onArchive: () => void
+  onDeleted: () => void
+}) {
+  const [isPending, startTransition] = useTransition()
+  const [impact, setImpact] = useState<any | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [confirmText, setConfirmText] = useState('')
+
+  const fullName = `${emp.firstName} ${emp.lastName}`.trim()
+  const matches = confirmText.trim().toLowerCase() === fullName.toLowerCase()
+
+  useEffect(() => {
+    let cancelled = false
+    getEmployeeDeletionImpact(emp.id)
+      .then(r => { if (!cancelled) { setImpact(r); setLoading(false) } })
+      .catch(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [emp.id])
+
+  function handleDelete() {
+    if (!matches) return
+    startTransition(async () => {
+      try {
+        await deleteEmployee(emp.id)
+        toast.success(`${fullName} borrado definitivamente`)
+        onDeleted()
+      } catch (err: any) {
+        toast.error(err?.message || 'No se pudo borrar el empleado')
+      }
+    })
+  }
+
+  const rows = impact ? [
+    { label: 'Turnos asignados', value: impact.assignments },
+    { label: 'Fichajes', value: impact.timeClock },
+    { label: 'Ausencias y vacaciones', value: impact.absences },
+    { label: 'Restricciones de disponibilidad', value: impact.availabilities },
+    { label: 'Contratos', value: impact.contracts },
+    { label: 'Roles y habilidades', value: impact.skills },
+  ].filter(r => r.value > 0) : []
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[480px] overflow-hidden">
+
+        <div className="flex items-start gap-3 px-5 py-4 border-b border-gray-100">
+          <div className="w-9 h-9 rounded-full bg-red-50 flex items-center justify-center flex-shrink-0">
+            <AlertTriangle size={18} className="text-red-600" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h3 className="text-[15px] font-bold text-gray-900">¿Borrar a {fullName}?</h3>
+            <p className="text-[12px] text-gray-500 mt-0.5">
+              Esta acción es permanente y no se puede deshacer.
+            </p>
+          </div>
+          <button onClick={onClose} className="p-1 rounded-lg hover:bg-gray-100 text-gray-400">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="px-5 py-4 space-y-4">
+          {loading ? (
+            <div className="flex items-center gap-2 text-[13px] text-gray-400 py-2">
+              <Loader2 size={14} className="animate-spin" /> Comprobando su histórico…
+            </div>
+          ) : rows.length > 0 ? (
+            <div className="rounded-xl border border-red-100 bg-red-50/60 p-3">
+              <p className="text-[12px] font-semibold text-red-800 mb-2">
+                Se borrará también todo esto:
+              </p>
+              <div className="space-y-1">
+                {rows.map(r => (
+                  <div key={r.label} className="flex items-center justify-between text-[12px]">
+                    <span className="text-red-700">{r.label}</span>
+                    <span className="font-bold text-red-800 tabular-nums">{r.value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <p className="text-[12px] text-gray-500">
+              No tiene histórico asociado, así que el borrado no afectará a ningún cuadrante.
+            </p>
+          )}
+
+          {rows.length > 0 && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+              <p className="text-[12px] text-amber-800 leading-snug">
+                Si solo quieres que deje de aparecer, <strong>archívalo</strong>: desaparece de
+                cuadrantes y métricas pero conserva el histórico para informes y nóminas.
+              </p>
+              <button
+                onClick={onArchive}
+                className="mt-2 text-[12px] font-semibold text-amber-800 underline hover:text-amber-900"
+              >
+                Archivar en su lugar
+              </button>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-[12px] font-medium text-gray-600 mb-1.5">
+              Escribe <strong className="text-gray-900">{fullName}</strong> para confirmar
+            </label>
+            <input
+              autoFocus
+              value={confirmText}
+              onChange={e => setConfirmText(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && matches) handleDelete() }}
+              placeholder={fullName}
+              className="w-full px-3 py-2 rounded-xl border border-gray-200 text-[13px] outline-none focus:border-red-400 focus:ring-2 focus:ring-red-100"
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 px-5 py-3 bg-gray-50 border-t border-gray-100">
+          <button
+            onClick={onClose}
+            disabled={isPending}
+            className="px-4 py-2 rounded-xl text-[13px] font-medium text-gray-600 hover:bg-gray-100 transition-colors"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleDelete}
+            disabled={!matches || isPending || loading}
+            className={cn(
+              'flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13px] font-semibold transition-colors',
+              matches && !isPending && !loading
+                ? 'bg-red-600 text-white hover:bg-red-700'
+                : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+            )}
+          >
+            {isPending ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+            Borrar definitivamente
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

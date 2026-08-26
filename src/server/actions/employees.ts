@@ -389,3 +389,80 @@ export async function duplicateEmployee(data: {
   revalidatePath(`/employees/${nuevo.id}`)
   return nuevo
 }
+
+// ── Borrado definitivo ─────────────────────────────────────────────────────
+/**
+ * Cuenta el histórico que se destruiría al borrar el empleado.
+ * El modal de confirmación lo usa para enseñar números reales en vez de una
+ * advertencia genérica.
+ */
+export async function getEmployeeDeletionImpact(id: string) {
+  const [assignments, timeClock, absences, availabilities, contracts, skills, employee] =
+    await Promise.all([
+      prisma.scheduleAssignment.count({ where: { employeeId: id } }),
+      prisma.timeClockEntry.count({ where: { employeeId: id } }),
+      prisma.absenceRequest.count({ where: { employeeId: id } }),
+      prisma.availability.count({ where: { employeeId: id } }),
+      prisma.employeeContract.count({ where: { employeeId: id } }),
+      prisma.employeeSkill.count({ where: { employeeId: id } }),
+      prisma.employee.findUnique({
+        where: { id },
+        select: { firstName: true, lastName: true },
+      }),
+    ])
+
+  return {
+    name: employee ? `${employee.firstName} ${employee.lastName}` : '',
+    assignments,
+    timeClock,
+    absences,
+    availabilities,
+    contracts,
+    skills,
+    total: assignments + timeClock + absences + availabilities + contracts + skills,
+  }
+}
+
+/**
+ * Borra el empleado y TODO su rastro. Es irreversible.
+ *
+ * `ScheduleAssignment` no tiene onDelete: Cascade en el esquema (a propósito:
+ * evita que un borrado accidental se lleve el cuadrante por delante), así que
+ * hay que eliminarlo explícitamente antes. El resto de relaciones sí cascadean.
+ *
+ * Se registra en AuditLog ANTES de borrar, para que quede constancia de qué
+ * había: es el único rastro que sobrevive.
+ */
+export async function deleteEmployee(id: string) {
+  const employee = await prisma.employee.findUnique({ where: { id } })
+  if (!employee) throw new Error('El empleado no existe o ya fue borrado')
+
+  const impact = await getEmployeeDeletionImpact(id)
+
+  await prisma.auditLog.create({
+    data: {
+      organizationId: employee.organizationId,
+      action: 'DELETE',
+      entity: 'Employee',
+      entityId: id,
+      oldValues: { ...employee, _impact: impact } as object,
+    },
+  })
+
+  await prisma.$transaction([
+    // Sin cascade: hay que borrarlos a mano o la FK bloquea el delete.
+    prisma.scheduleAssignment.deleteMany({ where: { employeeId: id } }),
+    // Relación opcional: se desvincula en vez de borrar el histórico de avisos.
+    prisma.validationIssue.updateMany({
+      where: { employeeId: id },
+      data: { employeeId: null },
+    }),
+    // Contratos, skills, disponibilidad, ausencias y fichajes van por cascade.
+    prisma.employee.delete({ where: { id } }),
+  ])
+
+  revalidatePath('/employees')
+  revalidatePath('/planning')
+  revalidatePath('/dashboard')
+  return { success: true, name: impact.name }
+}
