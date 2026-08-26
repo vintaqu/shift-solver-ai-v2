@@ -113,6 +113,11 @@ function mapEmployee(emp: any): Trabajador {
     etiquetas: etiquetasSolver,
     restricciones,
     min_horas_jornada: minHorasJornada,
+    // Preferencias de jornada del contrato. Sin contrato se asume permisivo
+    // (puede hacer partida) para no bloquear la generación por omisión.
+    solo_continuada: contract ? contract.allowSplit === false : false,
+    prefiere_continuada: contract ? contract.preferContinuous !== false : true,
+    max_horas_dia: contract?.maxDailyHours ?? undefined,
   }
 }
 
@@ -312,6 +317,19 @@ export function buildScheduleRequest(
       seed: seed ?? null,
       time_limit_seconds: 90,
       min_horas_jornada_global: 4.0,  // mínimo global — cada trabajador puede tener el suyo
+
+      // ── Reglas de jornada partida ──────────────────────────────────────
+      // Cada tramo del partido: entre 3 h y 5 h.
+      min_horas_tramo_partida: 3.0,
+      max_horas_tramo_partida: 5.0,
+      // Hueco entre tramos: entre 3 h y 5 h.
+      // El MÁXIMO es lo que impide partidas del tipo 06:00–09:00 + 18:30–22:00.
+      min_horas_gap_partida: 3.0,
+      max_horas_gap_partida: 5.0,
+      // Jornada continua: tramo mínimo de 2 h.
+      min_horas_tramo_continua: 2.0,
+      // Tope de horas ordinarias por día.
+      max_horas_dia: 9.0,
     },
   }
 }

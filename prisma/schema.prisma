@@ -266,6 +266,8 @@ model EmployeeContract {
   minWeeklyHours        Float?       // horquilla mínima
   maxWeeklyHours        Float?       // horquilla máxima
   maxDailyHours         Float        @default(9)
+  preferContinuous      Boolean      @default(true)  // preferencia blanda: evitar partidas
+  allowSplit            Boolean      @default(true)  // si false, el solver NUNCA le parte la jornada
   maxConsecutiveDays    Int          @default(6)
   minRestBetweenShifts  Float        @default(12) // horas
   annualMaxHours        Float        @default(1791)

@@ -79,10 +79,11 @@ export function EmployeeDetailClient({ employee: emp, skills: allSkills, roles: 
   const empSkillIds = Array.from(new Set(emp.skills?.map((s: any) => s.skill?.id).filter(Boolean))) as string[]
   const initials = `${emp.firstName?.[0] || ''}${emp.lastName?.[0] || ''}`.toUpperCase()
 
-  // Parse preferencias del contrato (guardadas en notes)
+  // Preferencias de jornada. Ya son columnas reales del contrato; el fallback
+  // al texto de `notes` cubre los contratos guardados antes de la migración.
   const contractNotes = contract?.notes || ''
-  const preferContinuous = !contractNotes.includes('preferContinuous:false')
-  const allowSplit = contractNotes.includes('allowSplit:true')
+  const preferContinuous = contract?.preferContinuous ?? !contractNotes.includes('preferContinuous:false')
+  const allowSplit = contract?.allowSplit ?? contractNotes.includes('allowSplit:true')
 
   const TABS = [
     { id: 'info', label: 'Información', icon: <User size={14} /> },
@@ -250,10 +251,10 @@ export function EmployeeDetailClient({ employee: emp, skills: allSkills, roles: 
                       active={allowSplit}
                       icon="✂️"
                       label="Acepta jornadas partidas"
-                      desc="Puede trabajar en dos tramos (3–5h por tramo, ≥1.5h de descanso entre ellos)"
+                      desc="Puede trabajar en dos tramos (3–5h por tramo, 3–5h de descanso entre ellos). Si se desactiva, el solver nunca le partirá la jornada."
                     />
                     <div className="text-[11px] text-gray-400 bg-gray-50 rounded-xl p-3 border border-gray-200">
-                      📋 <strong>Convenio hostelería Tarragona:</strong> Jornada partida → mínimo 3h por tramo, máximo 5h por tramo, descanso entre tramos ≥ 1.5h, total diario ≤ 9h ordinarias.
+                      📋 <strong>Convenio hostelería Tarragona:</strong> Jornada partida → mínimo 3h por tramo, máximo 5h por tramo, descanso entre tramos entre 3h y 5h, total diario ≤ 9h ordinarias.
                     </div>
                   </div>
                 </SectionCard>

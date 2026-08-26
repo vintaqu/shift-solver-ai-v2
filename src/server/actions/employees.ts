@@ -123,8 +123,9 @@ export async function upsertContract(data: {
           startDate: new Date(data.startDate),
           endDate: data.endDate ? new Date(data.endDate) : null,
           isActive: true,
-          notes: `preferContinuous:${data.preferContinuous},allowSplit:${data.allowSplit}`,
-        },
+          preferContinuous: data.preferContinuous,
+          allowSplit: data.allowSplit,
+        } as any,
       })
     : await prisma.employeeContract.create({
         data: {
@@ -142,8 +143,9 @@ export async function upsertContract(data: {
           startDate: new Date(data.startDate),
           endDate: data.endDate ? new Date(data.endDate) : null,
           isActive: true,
-          notes: `preferContinuous:${data.preferContinuous},allowSplit:${data.allowSplit}`,
-        },
+          preferContinuous: data.preferContinuous,
+          allowSplit: data.allowSplit,
+        } as any,
       })
 
   revalidatePath(`/employees/${data.employeeId}`)

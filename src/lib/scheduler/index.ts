@@ -49,6 +49,15 @@ export interface Trabajador {
   etiquetas: string[]   // ["CAJERA", "BARISTA", ...]
   restricciones: Restricciones
   min_horas_jornada?: number  // Jornada mínima diaria en horas (default: 4h). 0 = sin restricción.
+  // Si true, el solver nunca le asigna jornada partida (un solo tramo al día).
+  // Sale del contrato (allowSplit === false). Sustituye al antiguo hardcode
+  // por nombre que había dentro del solver.
+  solo_continuada?: boolean
+  // Preferencia blanda: penaliza más las partidas de este trabajador sin
+  // llegar a prohibirlas. Sale del contrato (preferContinuous).
+  prefiere_continuada?: boolean
+  // Tope de horas ordinarias diarias propio. Si falta, se usa el global.
+  max_horas_dia?: number
 }
 
 export interface FranjaNum {
@@ -80,6 +89,16 @@ export interface Parametros {
   seed?: number | null
   time_limit_seconds?: number
   min_horas_jornada_global?: number  // Jornada mínima global en horas para todos los trabajadores (default: 4h)
+
+  // ── Reglas de jornada partida ────────────────────────────────────────────
+  // Todas en HORAS. Antes estaban hardcodeadas en el solver; ahora viajan en
+  // el request para poder ajustarlas sin redesplegar el motor Python.
+  min_horas_tramo_partida?: number   // duración mínima de cada tramo del partido (default: 3h)
+  max_horas_tramo_partida?: number   // duración máxima de cada tramo del partido (default: 5h)
+  min_horas_gap_partida?: number     // hueco mínimo entre tramos (default: 3h)
+  max_horas_gap_partida?: number     // hueco MÁXIMO entre tramos (default: 5h)
+  min_horas_tramo_continua?: number  // tramo mínimo en jornada continua (default: 2h)
+  max_horas_dia?: number             // tope de horas ordinarias diarias (default: 9h)
 }
 
 export interface ScheduleRequest {
