@@ -486,8 +486,24 @@ export async function deleteDateSlot(id: string) {
 }
 
 // ── Roles disponibles para el editor de desglose ────────────────────────────
-export async function getLaborRolesForCoverage(organizationId: string) {
-  return prisma.laborRole.findMany({
+// El tipo del resultado se fija a mano: con `as any` en el select, Prisma
+// infiere una unión de todos los payloads posibles y cualquier acceso a una
+// propiedad del resultado deja de compilar.
+export interface LaborRoleForCoverage {
+  id: string
+  name: string
+  color: string
+  level: string | null
+  priority: number | null
+  rank: number | null
+  groupId: string | null
+  group: { id: string; name: string; color: string; displayOrder: number } | null
+}
+
+export async function getLaborRolesForCoverage(
+  organizationId: string,
+): Promise<LaborRoleForCoverage[]> {
+  const rows = await prisma.laborRole.findMany({
     where: { organizationId },
     select: {
       id: true, name: true, color: true, level: true, priority: true,
@@ -496,4 +512,5 @@ export async function getLaborRolesForCoverage(organizationId: string) {
     } as any,
     orderBy: [{ rank: 'asc' }, { name: 'asc' }] as any,
   })
+  return rows as unknown as LaborRoleForCoverage[]
 }
