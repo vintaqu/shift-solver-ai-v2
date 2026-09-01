@@ -157,6 +157,7 @@ model Organization {
   subscriptionPlan SubscriptionPlan?
   billingCustomer  BillingCustomer?
   laborRoles    LaborRole[]
+  laborRoleGroups LaborRoleGroup[]
   skills        Skill[]
   shiftTemplates ShiftTemplate[]
   notifications  Notification[]
@@ -291,11 +292,28 @@ model EmployeeContract {
 // ROLES Y SKILLS
 // ============================================================
 
+model LaborRoleGroup {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String            // "Sala", "Cocina", "Barra"...
+  color          String   @default("#6366f1")
+  displayOrder   Int      @default(0)
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  roles        LaborRole[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
 model LaborRole {
   id             String         @id @default(cuid())
   organizationId String
+  groupId        String?        // familia a la que pertenece (sala, cocina...)
+  rank           Int            @default(0)  // 0 = base; mayor = más alto dentro del grupo
   name           String
-  level          LaborRoleLevel
+  level          LaborRoleLevel               // LEGACY: sustituido por groupId + rank
   color          String         @default("#6366f1")
   isCritical     Boolean        @default(false)
   priority       Int            @default(0)
@@ -303,6 +321,7 @@ model LaborRole {
   createdAt      DateTime       @default(now())
 
   organization         Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  group                LaborRoleGroup?      @relation(fields: [groupId], references: [id], onDelete: SetNull)
   employeeSkills       EmployeeSkill[]
   coverageRequirements CoverageRequirement[]
   coverageRoleReqs     CoverageRoleRequirement[]
@@ -310,6 +329,7 @@ model LaborRole {
   shiftTemplates       ShiftTemplate[]
 
   @@index([organizationId])
+  @@index([groupId])
 }
 
 model Skill {
