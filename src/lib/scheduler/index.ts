@@ -103,7 +103,12 @@ export interface Parametros {
 
 export interface ScheduleRequest {
   dias: string[]                                          // ["LUNES","MARTES",...]
-  roles_jerarquia: string[]                               // ["CAMARERO_BASICO","SEMI_ENCARGADO","ENCARGADO","DUENO"]
+  // Lista plana de todos los roles (concatenación de los grupos). Se mantiene
+  // por compatibilidad; la jerarquía real vive en `grupos`.
+  roles_jerarquia: string[]
+  // Familias de roles con jerarquía propia. Los grupos son estancos: un rol
+  // de un grupo nunca cubre demanda de otro.
+  grupos?: { nombre: string; roles_jerarquia: string[] }[]
   etiquetas: string[]                                     // catálogo completo
   slot_duracion_min: number                               // 30
   horario_apertura: Record<string, HorarioApertura>

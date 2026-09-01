@@ -13,17 +13,71 @@ import type {
 
 // ── Mapeo de niveles internos → nombres exactos del solver ────────────────
 
-const LEVEL_TO_ROL: Record<string, string> = {
-  BASIC:        'CAMARERO_BASICO',
-  SEMI_MANAGER: 'SEMI_ENCARGADO',
-  MANAGER:      'ENCARGADO',
-  OWNER:        'DUENO',
+// Los roles ya no se traducen por `level`: cada LaborRole viaja al solver con
+// su propia clave, derivada del nombre. Antes dos roles distintos con el mismo
+// nivel (p. ej. "Cocinero" y "Camarero", ambos BASIC) colapsaban en el mismo
+// cubo y el solver los trataba como intercambiables.
+
+/** Clave estable y legible del rol para el solver. Los diagnósticos la muestran. */
+export function solverRoleKey(role: { id: string; name: string }): string {
+  const slug = (role.name || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')  // quitar acentos
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+  // Sufijo corto del id: evita colisiones si dos grupos tienen roles homónimos.
+  return slug ? `${slug}__${role.id.slice(-4).toUpperCase()}` : `ROL__${role.id.slice(-6).toUpperCase()}`
 }
 
-// Mapeo inverso — del nombre del solver al level de DB
-const ROL_TO_LEVEL: Record<string, string> = Object.fromEntries(
-  Object.entries(LEVEL_TO_ROL).map(([k, v]) => [v, k])
-)
+/** Quita roles repetidos por id. */
+function dedupeRoles(roles: any[]): any[] {
+  const seen = new Map<string, any>()
+  for (const r of roles) if (r?.id && !seen.has(r.id)) seen.set(r.id, r)
+  return Array.from(seen.values())
+}
+
+/** Nombre del grupo para el solver. Los grupos son estancos entre sí. */
+function solverGroupKey(group: { id: string; name: string } | null | undefined): string {
+  if (!group) return 'SIN_GRUPO'
+  const slug = (group.name || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+  return slug || `GRUPO__${group.id.slice(-4).toUpperCase()}`
+}
+
+/**
+ * Construye las familias de roles ordenadas por rango, tal y como las espera
+ * el solver: cada grupo lleva su cadena de menor a mayor.
+ */
+export function buildGruposFromRoles(laborRoles: any[]): { nombre: string; roles_jerarquia: string[] }[] {
+  const porGrupo = new Map<string, { nombre: string; orden: number; roles: any[] }>()
+
+  for (const r of laborRoles) {
+    const key = solverGroupKey(r.group)
+    const prev = porGrupo.get(key) ?? {
+      nombre: key,
+      orden: r.group?.displayOrder ?? 999,
+      roles: [],
+    }
+    prev.roles.push(r)
+    porGrupo.set(key, prev)
+  }
+
+  return Array.from(porGrupo.values())
+    .sort((a, b) => a.orden - b.orden || a.nombre.localeCompare(b.nombre))
+    .map(g => ({
+      nombre: g.nombre,
+      // De MENOR a MAYOR rango. Desempate por nombre para que el orden sea
+      // determinista cuando dos roles comparten rank.
+      roles_jerarquia: g.roles
+        .slice()
+        .sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0) || a.name.localeCompare(b.name))
+        .map(solverRoleKey),
+    }))
+    .filter(g => g.roles_jerarquia.length > 0)
+}
 
 // Días en español en orden — solver espera esta lista exacta
 const DIAS_SOLVER = ['LUNES', 'MARTES', 'MIERCOLES', 'JUEVES', 'VIERNES', 'SABADO', 'DOMINGO']
@@ -49,7 +103,10 @@ const HORARIO_APERTURA_DEFAULT: Record<string, HorarioApertura> = {
 
 function mapEmployee(emp: any): Trabajador {
   const contract = emp.contracts?.[0]
-  const roleLevel = emp.skills?.[0]?.laborRole?.level ?? 'BASIC'
+  // Rol principal del empleado. Cada empleado pertenece a UN solo grupo, así
+  // que su rol determina también su familia y, por tanto, qué demanda puede
+  // cubrir: nunca la de otro grupo.
+  const laborRole = emp.skills?.find((s: any) => s.laborRole)?.laborRole ?? null
   const skillNames = Array.from(new Set(
     emp.skills?.map((s: any) => s.skill?.name).filter(Boolean) as string[]
   ))
@@ -109,7 +166,7 @@ function mapEmployee(emp: any): Trabajador {
   return {
     nombre: `${emp.firstName.toUpperCase()} ${emp.lastName.toUpperCase()}`,
     contrato,
-    rol: LEVEL_TO_ROL[roleLevel] ?? 'CAMARERO_BASICO',
+    rol: laborRole ? solverRoleKey(laborRole) : 'SIN_ROL',
     etiquetas: etiquetasSolver,
     restricciones,
     min_horas_jornada: minHorasJornada,
@@ -123,7 +180,7 @@ function mapEmployee(emp: any): Trabajador {
 
 // ── Mapper: CoverageRequirements DB → Franjas solver ──────────────────────
 
-function mapCoverageToFranjas(slots: any[]): {
+function mapCoverageToFranjas(slots: any[], defaultRolKey: string): {
   franjas_num: Record<string, FranjaNum[]>
   franjas_rol: Record<string, FranjaRol[]>
   franjas_eti: Record<string, FranjaEti[]>
@@ -165,29 +222,23 @@ function mapCoverageToFranjas(slots: any[]): {
 
       if (roleReqs.length > 0) {
         for (const rr of roleReqs) {
-          const level = rr.laborRole?.level
-          const rolSolver = LEVEL_TO_ROL[level] ?? 'CAMARERO_BASICO'
+          if (!rr.laborRole) continue
+          const rolSolver = solverRoleKey(rr.laborRole)
           const prev = personas_por_rol[rolSolver] ?? { min: 0, ideal: 0 }
           prev.min += rr.minWorkers ?? 0
           prev.ideal += rr.idealWorkers ?? rr.minWorkers ?? 0
           personas_por_rol[rolSolver] = prev
         }
       } else {
-        // Fallback legacy: reparto histórico (1 del rol requerido + resto CB).
+        // Fallback legacy: el slot no tiene desglose por rol (datos previos a
+        // la migración). Toda la demanda va al rol indicado en el slot, y si no
+        // hay ninguno, al rol base del primer grupo. Antes se repartía entre
+        // "1 del rol + resto camareros básicos", un reparto que dejó de tener
+        // sentido en cuanto los roles dejaron de ser una cadena única.
         const min = slot.minWorkers ?? 0
         const ideal = slot.idealWorkers ?? min
-        if (slot.laborRole && LEVEL_TO_ROL[slot.laborRole.level] &&
-            LEVEL_TO_ROL[slot.laborRole.level] !== 'CAMARERO_BASICO') {
-          const rolSolver = LEVEL_TO_ROL[slot.laborRole.level]
-          personas_por_rol[rolSolver] = { min: Math.min(1, min) || 1, ideal: 1 }
-          const restoMin = Math.max(0, min - 1)
-          const restoIdeal = Math.max(restoMin, ideal - 1)
-          if (restoIdeal > 0) {
-            personas_por_rol['CAMARERO_BASICO'] = { min: restoMin, ideal: restoIdeal }
-          }
-        } else {
-          personas_por_rol['CAMARERO_BASICO'] = { min, ideal }
-        }
+        const rolSolver = slot.laborRole ? solverRoleKey(slot.laborRole) : defaultRolKey
+        if (rolSolver) personas_por_rol[rolSolver] = { min, ideal }
       }
 
       // Empujar la franja de rol (con min/ideal reales)
@@ -260,7 +311,17 @@ export function buildScheduleRequest(
   openingHours: Record<string, { open: string; close: string }> | null,
   seed?: number,
   absenceBlocks?: Record<string, string[]>,  // nombre_solver → ['LUNES', 'MARTES', ...]
+  laborRoles: any[] = [],                    // catálogo completo con group + rank
 ): ScheduleRequest {
+  // Familias de roles. Si no llega catálogo (llamada legacy), se deducen de
+  // los roles que traen los propios empleados para no romper nada.
+  const rolesCatalogo = laborRoles.length > 0
+    ? laborRoles
+    : dedupeRoles(employees.flatMap((e: any) =>
+        (e.skills ?? []).map((s: any) => s.laborRole).filter(Boolean)))
+  const grupos = buildGruposFromRoles(rolesCatalogo)
+  // Rol base del primer grupo — destino de la demanda legacy sin desglose.
+  const defaultRolKey = grupos[0]?.roles_jerarquia[0] ?? ''
   // Horario de apertura: del local si existe, si no el default
   const horario_apertura: Record<string, HorarioApertura> = {}
   for (const dia of DIAS_SOLVER) {
@@ -287,7 +348,7 @@ export function buildScheduleRequest(
   ]
   for (const e of ETIQUETAS_CATALOGO) etiquetasSet.add(e)
 
-  const { franjas_num, franjas_rol, franjas_eti } = mapCoverageToFranjas(coverageSlots)
+  const { franjas_num, franjas_rol, franjas_eti } = mapCoverageToFranjas(coverageSlots, defaultRolKey)
 
   // Aplicar ausencias como días_libres extra en las restricciones de cada trabajador
   const trabajadores = employees.map(emp => {
@@ -305,7 +366,9 @@ export function buildScheduleRequest(
 
   return {
     dias: DIAS_SOLVER,
-    roles_jerarquia: ['CAMARERO_BASICO', 'SEMI_ENCARGADO', 'ENCARGADO', 'DUENO'],
+    // Lista plana (compatibilidad) + familias con jerarquía propia.
+    roles_jerarquia: grupos.flatMap(g => g.roles_jerarquia),
+    grupos,
     etiquetas: Array.from(etiquetasSet),
     slot_duracion_min: 30,
     horario_apertura,

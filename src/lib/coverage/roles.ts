@@ -191,23 +191,24 @@ export async function cloneRoleRequirements(
  * Devuelve null si la organización no tiene roles configurados.
  */
 export async function getDefaultLaborRoleId(organizationId: string): Promise<string | null> {
-  const LEVEL_ORDER: Record<string, number> = {
-    BASIC: 0,
-    SEMI_MANAGER: 1,
-    MANAGER: 2,
-    OWNER: 3,
-  }
-
+  // El rol por defecto es el BASE del primer grupo: el escalón más bajo de la
+  // primera familia. Antes se deducía del enum de niveles, que ya no manda.
   const roles = await prisma.laborRole.findMany({
     where: { organizationId },
-    select: { id: true, level: true, priority: true },
+    select: {
+      id: true, rank: true, priority: true,
+      group: { select: { displayOrder: true, name: true } },
+    } as any,
   })
   if (roles.length === 0) return null
 
-  roles.sort((a, b) => {
-    const la = LEVEL_ORDER[a.level as unknown as string] ?? 99
-    const lb = LEVEL_ORDER[b.level as unknown as string] ?? 99
-    if (la !== lb) return la - lb
+  roles.sort((a: any, b: any) => {
+    const ga = a.group?.displayOrder ?? 999
+    const gb = b.group?.displayOrder ?? 999
+    if (ga !== gb) return ga - gb
+    const ra = a.rank ?? 0
+    const rb = b.rank ?? 0
+    if (ra !== rb) return ra - rb
     return (a.priority ?? 0) - (b.priority ?? 0)
   })
 

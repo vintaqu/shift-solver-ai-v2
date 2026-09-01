@@ -1,19 +1,23 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
   Users, Building2, Shield, Plus, Pencil, Loader2,
   CheckCircle, X, Eye, EyeOff, Copy, AlertCircle,
-  ToggleLeft, ToggleRight, Link, Trash2
+  ToggleLeft, ToggleRight, Link, Trash2, ChevronUp, ChevronDown
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
   createUser, resetUserPassword, toggleUserActive,
   updateOrganizationBranding
 } from '@/server/actions/auth'
-import { createSkill, updateSkill, deleteSkill, updateLaborRole } from '@/server/actions/skills'
+import {
+  createSkill, updateSkill, deleteSkill, updateLaborRole,
+  createRoleGroup, updateRoleGroup, deleteRoleGroup,
+  createLaborRole, deleteLaborRole, reorderRolesInGroup,
+} from '@/server/actions/skills'
 
 const ROLE_LABELS: Record<string, { label: string; cls: string }> = {
   SUPER_ADMIN: { label: 'Super Admin', cls: 'bg-red-100 text-red-700 border-red-200' },
@@ -37,7 +41,7 @@ function Field({ label, hint, children }: any) {
   )
 }
 
-export function SettingsClient({ organization, members, skills, roles, currentUserId, currentUserRole }: any) {
+export function SettingsClient({ organization, members, skills, roles, groups = [], currentUserId, currentUserRole }: any) {
   const router = useRouter()
   const [tab, setTab] = useState<'org' | 'users' | 'skills'>('org')
 
@@ -79,6 +83,7 @@ export function SettingsClient({ organization, members, skills, roles, currentUs
           <SkillsTab
             skills={skills}
             roles={roles}
+            groups={groups}
             organizationId={organization.id}
             isOwner={isOwner}
             onChanged={() => router.refresh()}
@@ -472,7 +477,7 @@ const ROLE_LEVEL_LABELS: Record<string, { label: string; desc: string }> = {
   OWNER:        { label: 'Dueño / Socio',    desc: 'Nivel máximo — sin restricciones legales por defecto' },
 }
 
-function SkillsTab({ skills, roles, organizationId, isOwner, onChanged }: any) {
+function SkillsTab({ skills, roles, groups = [], organizationId, isOwner, onChanged }: any) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [newSkill, setNewSkill] = useState({ name: '', color: '#6366f1' })
@@ -529,61 +534,18 @@ function SkillsTab({ skills, roles, organizationId, isOwner, onChanged }: any) {
   return (
     <div className="space-y-5">
 
-      {/* ── ROLES ── */}
-      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-        <div className="px-5 py-3.5 border-b border-gray-100">
-          <h3 className="text-[14px] font-bold text-gray-800">Roles del personal</h3>
-          <p className="text-[11px] text-gray-400 mt-0.5">
-            Los niveles de rol los usa el solver — solo puedes cambiar el nombre y el color.
-          </p>
-        </div>
-        <div className="divide-y divide-gray-100">
-          {roles.map((role: any) => {
-            const levelInfo = ROLE_LEVEL_LABELS[role.level] ?? { label: role.level, desc: '' }
-            const isEditing = editingRole?.id === role.id
-
-            return (
-              <div key={role.id} className="px-5 py-3.5">
-                {isEditing ? (
-                  <RoleEditRow
-                    role={editingRole}
-                    onSave={(data: any) => handleUpdateRole(role.id, data)}
-                    onCancel={() => setEditingRole(null)}
-                    isPending={isPending}
-                  />
-                ) : (
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0"
-                      style={{ backgroundColor: role.color }}>
-                      {role.name[0]}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[13px] font-bold text-gray-800">{role.name}</span>
-                        <span className="text-[10px] font-mono text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">
-                          {role.level}
-                        </span>
-                        <span className="text-[10px] text-gray-400">
-                          · {role._count?.employeeSkills ?? 0} empleados
-                        </span>
-                      </div>
-                      <div className="text-[11px] text-gray-400 mt-0.5">{levelInfo.desc}</div>
-                    </div>
-                    {isOwner && (
-                      <button
-                        onClick={() => setEditingRole({ ...role })}
-                        className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-indigo-600 transition-colors"
-                      >
-                        <Pencil size={13} />
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      </div>
+      {/* ── GRUPOS Y ROLES ── */}
+      <RoleGroupsSection
+        groups={groups}
+        roles={roles}
+        organizationId={organizationId}
+        isOwner={isOwner}
+        onChanged={onChanged}
+        editingRole={editingRole}
+        setEditingRole={setEditingRole}
+        onUpdateRole={handleUpdateRole}
+        isPending={isPending}
+      />
 
       {/* ── SKILLS / ETIQUETAS ── */}
       <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
@@ -797,6 +759,260 @@ function RoleEditRow({ role, onSave, onCancel, isPending }: any) {
           className="px-3 py-1.5 rounded-lg text-[12px] text-gray-500 hover:bg-gray-100 transition-colors">
           Cancelar
         </button>
+      </div>
+    </div>
+  )
+}
+
+// ─── Grupos de roles con jerarquía propia ────────────────────────────────────
+// Cada grupo es una familia (sala, cocina, barra...) con su propia cadena de
+// mando. Los grupos son ESTANCOS: el solver nunca usa a alguien de un grupo
+// para tapar la demanda de otro, ni al rol más alto. Dentro de un grupo sí:
+// el rango superior cubre a todos los inferiores.
+function RoleGroupsSection({
+  groups, roles, organizationId, isOwner, onChanged,
+  editingRole, setEditingRole, onUpdateRole, isPending,
+}: any) {
+  const [creating, setCreating] = useState(false)
+  const [newGroup, setNewGroup] = useState({ name: '', color: '#6366f1' })
+  const [addingRoleTo, setAddingRoleTo] = useState<string | null>(null)
+  const [newRole, setNewRole] = useState({ name: '', color: '#6366f1' })
+  const [busy, startBusy] = useTransition()
+
+  // Roles por grupo, ordenados de MAYOR a MENOR rango: arriba el que manda.
+  const rolesByGroup = useMemo(() => {
+    const map = new Map<string, any[]>()
+    for (const r of roles) {
+      const gid = r.groupId ?? r.group?.id ?? '__none__'
+      const list = map.get(gid) ?? []
+      list.push(r)
+      map.set(gid, list)
+    }
+    for (const list of map.values()) {
+      list.sort((a, b) => (b.rank ?? 0) - (a.rank ?? 0) || a.name.localeCompare(b.name))
+    }
+    return map
+  }, [roles])
+
+  const orphans = rolesByGroup.get('__none__') ?? []
+
+  function run(fn: () => Promise<any>, ok: string) {
+    startBusy(async () => {
+      try { await fn(); toast.success(ok); onChanged() }
+      catch (e: any) { toast.error(e.message) }
+    })
+  }
+
+  // Sube o baja un rol dentro de su grupo. El array se envía de MENOR a MAYOR.
+  function move(groupId: string, list: any[], index: number, dir: -1 | 1) {
+    const target = index + dir
+    if (target < 0 || target >= list.length) return
+    const next = [...list]
+    ;[next[index], next[target]] = [next[target], next[index]]
+    const ascending = [...next].reverse().map(r => r.id)
+    run(() => reorderRolesInGroup(groupId, ascending), 'Jerarquía actualizada')
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+      <div className="flex items-start justify-between px-5 py-3.5 border-b border-gray-100">
+        <div>
+          <h3 className="text-[14px] font-bold text-gray-800">Grupos y roles</h3>
+          <p className="text-[11px] text-gray-400 mt-0.5">
+            Cada grupo tiene su propia jerarquía. Dentro de un grupo, el rol de arriba puede
+            cubrir a los de abajo — entre grupos distintos nunca.
+          </p>
+        </div>
+        {isOwner && (
+          <button
+            onClick={() => setCreating(v => !v)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 text-white text-[12px] font-semibold hover:bg-indigo-700 transition-colors flex-shrink-0"
+          >
+            <Plus size={13} /> Nuevo grupo
+          </button>
+        )}
+      </div>
+
+      {creating && isOwner && (
+        <div className="px-5 py-3 bg-indigo-50/50 border-b border-gray-100 flex items-center gap-2">
+          <input
+            autoFocus
+            value={newGroup.name}
+            onChange={e => setNewGroup(g => ({ ...g, name: e.target.value }))}
+            placeholder="Nombre del grupo (Sala, Cocina...)"
+            className="flex-1 px-3 py-2 rounded-xl border border-gray-200 text-[13px] outline-none focus:border-indigo-400"
+          />
+          <input
+            type="color"
+            value={newGroup.color}
+            onChange={e => setNewGroup(g => ({ ...g, color: e.target.value }))}
+            className="w-10 h-9 rounded-lg border border-gray-200 cursor-pointer"
+          />
+          <button
+            disabled={busy || !newGroup.name.trim()}
+            onClick={() => {
+              run(
+                () => createRoleGroup({ organizationId, name: newGroup.name, color: newGroup.color }),
+                'Grupo creado'
+              )
+              setCreating(false)
+              setNewGroup({ name: '', color: '#6366f1' })
+            }}
+            className="px-3 py-2 rounded-xl bg-indigo-600 text-white text-[12px] font-semibold disabled:bg-gray-200 disabled:text-gray-400"
+          >
+            Crear
+          </button>
+          <button onClick={() => setCreating(false)} className="p-2 rounded-lg text-gray-400 hover:bg-gray-100">
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
+      <div className="divide-y divide-gray-100">
+        {groups.length === 0 && orphans.length === 0 && (
+          <div className="px-5 py-8 text-center text-[13px] text-gray-400">
+            Aún no hay grupos. Crea uno para empezar a organizar los roles.
+          </div>
+        )}
+
+        {groups.map((group: any) => {
+          const list = rolesByGroup.get(group.id) ?? []
+          return (
+            <div key={group.id} className="px-5 py-4">
+              <div className="flex items-center gap-2.5 mb-2.5">
+                <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: group.color }} />
+                <span className="text-[13px] font-bold text-gray-800">{group.name}</span>
+                <span className="text-[10px] text-gray-400">
+                  · {list.length} rol{list.length === 1 ? '' : 'es'}
+                </span>
+                {isOwner && (
+                  <div className="ml-auto flex items-center gap-1">
+                    <button
+                      onClick={() => { setAddingRoleTo(group.id); setNewRole({ name: '', color: group.color }) }}
+                      className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold text-indigo-600 hover:bg-indigo-50"
+                    >
+                      <Plus size={12} /> Rol
+                    </button>
+                    <button
+                      onClick={() => run(() => deleteRoleGroup(group.id), 'Grupo eliminado')}
+                      className="p-1.5 rounded-lg text-gray-300 hover:bg-red-50 hover:text-red-500 transition-colors"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {addingRoleTo === group.id && (
+                <div className="flex items-center gap-2 mb-2.5 pl-5">
+                  <input
+                    autoFocus
+                    value={newRole.name}
+                    onChange={e => setNewRole(r => ({ ...r, name: e.target.value }))}
+                    placeholder="Nombre del rol"
+                    className="flex-1 px-3 py-2 rounded-xl border border-gray-200 text-[13px] outline-none focus:border-indigo-400"
+                  />
+                  <input
+                    type="color"
+                    value={newRole.color}
+                    onChange={e => setNewRole(r => ({ ...r, color: e.target.value }))}
+                    className="w-10 h-9 rounded-lg border border-gray-200 cursor-pointer"
+                  />
+                  <button
+                    disabled={busy || !newRole.name.trim()}
+                    onClick={() => { run(() => createLaborRole({ organizationId, groupId: group.id, name: newRole.name, color: newRole.color }), 'Rol creado'); setAddingRoleTo(null) }}
+                    className="px-3 py-2 rounded-xl bg-indigo-600 text-white text-[12px] font-semibold disabled:bg-gray-200 disabled:text-gray-400"
+                  >
+                    Añadir
+                  </button>
+                  <button onClick={() => setAddingRoleTo(null)} className="p-2 rounded-lg text-gray-400 hover:bg-gray-100">
+                    <X size={14} />
+                  </button>
+                </div>
+              )}
+
+              {list.length === 0 ? (
+                <p className="pl-5 text-[12px] text-gray-400">Sin roles todavía.</p>
+              ) : (
+                <div className="pl-5 space-y-1.5">
+                  {list.map((role: any, idx: number) => (
+                    editingRole?.id === role.id ? (
+                      <RoleEditRow
+                        key={role.id}
+                        role={editingRole}
+                        onSave={(data: any) => onUpdateRole(role.id, data)}
+                        onCancel={() => setEditingRole(null)}
+                        isPending={isPending}
+                      />
+                    ) : (
+                      <div key={role.id} className="flex items-center gap-2.5 py-1.5">
+                        <span className="text-[10px] font-mono text-gray-300 w-8 flex-shrink-0">
+                          {idx === 0 ? 'top' : `#${list.length - idx}`}
+                        </span>
+                        <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: role.color }} />
+                        <span className="text-[13px] font-semibold text-gray-700">{role.name}</span>
+                        <span className="text-[10px] text-gray-400">
+                          · {role._count?.employeeSkills ?? 0} empleados
+                        </span>
+                        {isOwner && (
+                          <div className="ml-auto flex items-center gap-0.5">
+                            <button
+                              disabled={idx === 0 || busy}
+                              onClick={() => move(group.id, list, idx, -1)}
+                              title="Subir en la jerarquía"
+                              className="p-1 rounded text-gray-300 hover:bg-gray-100 hover:text-gray-600 disabled:opacity-30 disabled:hover:bg-transparent"
+                            >
+                              <ChevronUp size={13} />
+                            </button>
+                            <button
+                              disabled={idx === list.length - 1 || busy}
+                              onClick={() => move(group.id, list, idx, 1)}
+                              title="Bajar en la jerarquía"
+                              className="p-1 rounded text-gray-300 hover:bg-gray-100 hover:text-gray-600 disabled:opacity-30 disabled:hover:bg-transparent"
+                            >
+                              <ChevronDown size={13} />
+                            </button>
+                            <button
+                              onClick={() => setEditingRole({ ...role })}
+                              className="p-1 rounded text-gray-300 hover:bg-gray-100 hover:text-indigo-600"
+                            >
+                              <Pencil size={12} />
+                            </button>
+                            <button
+                              onClick={() => run(() => deleteLaborRole(role.id), 'Rol eliminado')}
+                              className="p-1 rounded text-gray-300 hover:bg-red-50 hover:text-red-500"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  ))}
+                </div>
+              )}
+            </div>
+          )
+        })}
+
+        {orphans.length > 0 && (
+          <div className="px-5 py-4 bg-amber-50/50">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-[13px] font-bold text-amber-800">Sin grupo</span>
+              <span className="text-[10px] text-amber-600">
+                · {orphans.length} rol(es) que el solver ignorará hasta asignarles grupo
+              </span>
+            </div>
+            <div className="pl-5 space-y-1">
+              {orphans.map((role: any) => (
+                <div key={role.id} className="flex items-center gap-2.5 text-[13px] text-gray-600">
+                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: role.color }} />
+                  {role.name}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

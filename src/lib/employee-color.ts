@@ -12,7 +12,7 @@
 // Color por defecto cuando no hay ningún rol del que tirar.
 export const DEFAULT_EMPLOYEE_COLOR = '#9ca3af' // gris neutro (tailwind gray-400)
 
-// Orden jerárquico de niveles (menor → mayor).
+// Orden jerárquico legacy, solo como respaldo para roles sin `rank`.
 const LEVEL_ORDER: Record<string, number> = {
   BASIC: 0,
   SEMI_MANAGER: 1,
@@ -25,6 +25,8 @@ interface LaborRoleLike {
   name?: string | null
   color?: string | null
   level?: string | null
+  rank?: number | null
+  groupId?: string | null
   priority?: number | null
 }
 
@@ -41,6 +43,9 @@ interface EmployeeLike {
 
 function levelOf(role: LaborRoleLike | null | undefined): number {
   if (!role) return -1
+  // `rank` es la jerarquía real dentro del grupo. `level` solo sobrevive como
+  // respaldo para roles anteriores a la migración a grupos.
+  if (role.rank != null) return role.rank
   return LEVEL_ORDER[role.level ?? 'BASIC'] ?? 0
 }
 

@@ -31,7 +31,7 @@ export default async function EmployeeDetailPage({ params }: { params: { id: str
 
   const [skills, roles, legalFrameworks] = await Promise.all([
     prisma.skill.findMany({ where: { organizationId: emp.organizationId } }),
-    prisma.laborRole.findMany({ where: { organizationId: emp.organizationId }, orderBy: { priority: 'asc' } }),
+    prisma.laborRole.findMany({ where: { organizationId: emp.organizationId }, include: { group: true } as any, orderBy: [{ rank: 'asc' }, { name: 'asc' }] as any }),
     getLegalFrameworks(),
   ])
 

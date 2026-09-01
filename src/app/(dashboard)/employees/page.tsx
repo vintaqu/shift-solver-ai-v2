@@ -29,7 +29,7 @@ export default async function EmployeesPage() {
       orderBy: [{ status: 'asc' }, { firstName: 'asc' }] as any,
     }),
     prisma.skill.findMany({ where: { organizationId } }),
-    prisma.laborRole.findMany({ where: { organizationId }, orderBy: { priority: 'asc' } }),
+    prisma.laborRole.findMany({ where: { organizationId }, include: { group: true } as any, orderBy: [{ rank: 'asc' }, { name: 'asc' }] as any }),
     getLegalFrameworks(),
   ])
 

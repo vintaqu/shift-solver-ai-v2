@@ -13,7 +13,7 @@ export default async function SettingsPage() {
   const organizationId = session.user.organizationId
   if (!organizationId) redirect('/dashboard')
 
-  const [organization, members, { skills, roles }] = await Promise.all([
+  const [organization, members, { skills, roles, groups }] = await Promise.all([
     prisma.organization.findUnique({ where: { id: organizationId } }),
     prisma.organizationMember.findMany({
       where: { organizationId },
@@ -35,6 +35,7 @@ export default async function SettingsPage() {
       members={JSON.parse(JSON.stringify(members))}
       skills={JSON.parse(JSON.stringify(skills))}
       roles={JSON.parse(JSON.stringify(roles))}
+      groups={JSON.parse(JSON.stringify(groups))}
       currentUserId={session.user.id}
       currentUserRole={session.user.role}
     />

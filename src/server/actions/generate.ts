@@ -118,12 +118,21 @@ export async function generateSchedule(
   }
 
   // 4. Construir el payload para el solver (con ausencias como días_libres)
+  // Catálogo completo de roles con su grupo y rango. Es lo que define las
+  // familias y la jerarquía interna que se envían al solver.
+  const laborRoles = await prisma.laborRole.findMany({
+    where: { organizationId: period.organizationId },
+    include: { group: true } as any,
+    orderBy: [{ rank: 'asc' }, { name: 'asc' }] as any,
+  })
+
   const payload = buildScheduleRequest(
     employees,
     coverageSlots,
     (period.location as any).openingHours as Record<string, { open: string; close: string }> | null,
     options?.seed,
     absenceBlocks,  // ← días bloqueados por ausencias aprobadas
+    laborRoles,
   )
 
   // 4. Llamar a la API OR-Tools

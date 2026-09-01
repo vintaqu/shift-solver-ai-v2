@@ -489,7 +489,11 @@ export async function deleteDateSlot(id: string) {
 export async function getLaborRolesForCoverage(organizationId: string) {
   return prisma.laborRole.findMany({
     where: { organizationId },
-    select: { id: true, name: true, color: true, level: true, priority: true },
-    orderBy: [{ priority: 'asc' }, { name: 'asc' }],
+    select: {
+      id: true, name: true, color: true, level: true, priority: true,
+      rank: true, groupId: true,
+      group: { select: { id: true, name: true, color: true, displayOrder: true } },
+    } as any,
+    orderBy: [{ rank: 'asc' }, { name: 'asc' }] as any,
   })
 }

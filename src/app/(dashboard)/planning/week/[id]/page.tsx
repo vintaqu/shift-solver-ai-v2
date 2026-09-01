@@ -63,7 +63,8 @@ export default async function PlanningWeekPage({ params }: { params: { id: strin
   // Roles laborales (para el editor de cobertura inline)
   const laborRoles = await prisma.laborRole.findMany({
     where: { organizationId: period.organizationId },
-    orderBy: { priority: 'asc' },
+    include: { group: true } as any,
+    orderBy: [{ rank: 'asc' }, { name: 'asc' }] as any,
   })
 
   // Ausencias aprobadas que solapan con esta semana (para avisos en el grid)

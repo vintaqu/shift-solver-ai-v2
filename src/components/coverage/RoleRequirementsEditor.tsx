@@ -18,7 +18,7 @@ import { useMemo, useRef, useState, useEffect } from 'react'
 import { Plus, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-// Orden jerárquico de niveles (menor → mayor)
+// Orden jerárquico legacy — solo como respaldo para roles sin grupo asignado.
 const LEVEL_ORDER: Record<string, number> = {
   BASIC: 0,
   SEMI_MANAGER: 1,
@@ -37,17 +37,46 @@ export interface LaborRoleOption {
   name: string
   color: string
   level?: string
+  rank?: number
+  groupId?: string | null
+  group?: { id: string; name: string; color?: string; displayOrder?: number } | null
   priority?: number
 }
 
-/** Ordena roles por nivel jerárquico y luego por priority. */
+/**
+ * Ordena por grupo y, dentro de cada grupo, por rango.
+ * Antes ordenaba por el enum de niveles, que era una cadena única global.
+ */
 export function sortRoles(roles: LaborRoleOption[]): LaborRoleOption[] {
   return [...roles].sort((a, b) => {
-    const la = LEVEL_ORDER[a.level ?? 'BASIC'] ?? 99
-    const lb = LEVEL_ORDER[b.level ?? 'BASIC'] ?? 99
-    if (la !== lb) return la - lb
+    const ga = a.group?.displayOrder ?? 999
+    const gb = b.group?.displayOrder ?? 999
+    if (ga !== gb) return ga - gb
+    const na = a.group?.name ?? ''
+    const nb = b.group?.name ?? ''
+    if (na !== nb) return na.localeCompare(nb)
+    const ra = a.rank ?? LEVEL_ORDER[a.level ?? 'BASIC'] ?? 99
+    const rb = b.rank ?? LEVEL_ORDER[b.level ?? 'BASIC'] ?? 99
+    if (ra !== rb) return ra - rb
     return (a.priority ?? 0) - (b.priority ?? 0)
   })
+}
+
+/** Agrupa los roles por familia, ya ordenados, para pintarlos con cabecera. */
+export function groupRoles(roles: LaborRoleOption[]): {
+  groupId: string
+  groupName: string
+  roles: LaborRoleOption[]
+}[] {
+  const out: { groupId: string; groupName: string; roles: LaborRoleOption[] }[] = []
+  for (const r of sortRoles(roles)) {
+    const gid = r.group?.id ?? r.groupId ?? '__sin_grupo__'
+    const gname = r.group?.name ?? 'Sin grupo'
+    const last = out[out.length - 1]
+    if (last && last.groupId === gid) last.roles.push(r)
+    else out.push({ groupId: gid, groupName: gname, roles: [r] })
+  }
+  return out
 }
 
 /**
@@ -100,6 +129,10 @@ export function RoleRequirementsEditor({ value, onChange, roles, disabled }: Pro
     () => sortedRoles.filter(r => !value.some(v => v.laborRoleId === r.id)),
     [sortedRoles, value],
   )
+
+  // Los roles disponibles se ofrecen agrupados por familia, para que quede
+  // claro que un rol de cocina no sustituye a uno de sala.
+  const availableGrouped = useMemo(() => groupRoles(available), [available])
 
   // Cerrar el desplegable "+" al hacer click fuera
   useEffect(() => {
@@ -159,6 +192,9 @@ export function RoleRequirementsEditor({ value, onChange, roles, disabled }: Pro
               />
               <span className="text-[13px] font-semibold text-gray-700 truncate">
                 {role?.name ?? 'Rol desconocido'}
+                {role?.group?.name && (
+                  <span className="ml-1.5 text-[10px] font-medium text-gray-400">{role.group.name}</span>
+                )}
               </span>
             </div>
 
@@ -220,16 +256,23 @@ export function RoleRequirementsEditor({ value, onChange, roles, disabled }: Pro
 
           {addOpen && (
             <div className="absolute z-10 mt-1 w-full bg-white rounded-xl shadow-lg border border-gray-100 py-1 max-h-52 overflow-y-auto">
-              {available.map(r => (
-                <button
-                  key={r.id}
-                  type="button"
-                  onClick={() => addRole(r.id)}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-gray-50 transition-colors"
-                >
-                  <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: r.color }} />
-                  <span className="text-[13px] font-medium text-gray-700">{r.name}</span>
-                </button>
+              {availableGrouped.map(g => (
+                <div key={g.groupId}>
+                  <div className="px-3 pt-2 pb-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                    {g.groupName}
+                  </div>
+                  {g.roles.map(r => (
+                    <button
+                      key={r.id}
+                      type="button"
+                      onClick={() => addRole(r.id)}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-gray-50 transition-colors"
+                    >
+                      <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: r.color }} />
+                      <span className="text-[13px] font-medium text-gray-700">{r.name}</span>
+                    </button>
+                  ))}
+                </div>
               ))}
             </div>
           )}
