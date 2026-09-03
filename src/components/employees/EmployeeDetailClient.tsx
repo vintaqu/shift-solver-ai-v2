@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition, useEffect } from 'react'
+import { useState, useTransition, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
@@ -75,7 +75,21 @@ export function EmployeeDetailClient({ employee: emp, skills: allSkills, roles: 
   const [isPending, startTransition] = useTransition()
 
   const contract = emp.contracts?.find((c: any) => c.isActive) || emp.contracts?.[0]
-  const mainRoleLevel = emp.skills?.[0]?.laborRole?.level || 'BASIC'
+  // El rol principal se identifica por ID. Con los grupos ya no vale el `level`:
+  // varios roles comparten nivel (Camarero y Cocinero son ambos BASIC) y se
+  // confundirían entre sí.
+  const mainRole = emp.skills?.find((s: any) => s.laborRole)?.laborRole ?? null
+  const mainRoleId: string | null = mainRole?.id ?? null
+  const mainRoleLevel = mainRole?.level || 'BASIC'
+
+  // Cadena del grupo al que pertenece, de menor a mayor rango.
+  const rolesOfMainGroup = useMemo(() => {
+    const gid = mainRole?.groupId ?? mainRole?.group?.id ?? null
+    if (!gid) return mainRole ? [mainRole] : []
+    return allRoles
+      .filter((r: any) => (r.groupId ?? r.group?.id) === gid)
+      .sort((a: any, b: any) => (a.rank ?? 0) - (b.rank ?? 0) || a.name.localeCompare(b.name))
+  }, [allRoles, mainRole])
   const empSkillIds = Array.from(new Set(emp.skills?.map((s: any) => s.skill?.id).filter(Boolean))) as string[]
   const initials = `${emp.firstName?.[0] || ''}${emp.lastName?.[0] || ''}`.toUpperCase()
 
@@ -285,30 +299,41 @@ export function EmployeeDetailClient({ employee: emp, skills: allSkills, roles: 
               title="Rol laboral"
               action={<EditBtn onClick={() => setEditRoles(true)} />}
             >
-              {/* Jerarquía visual */}
+              {/* Jerarquía visual — solo la del grupo al que pertenece */}
               <div className="mb-4">
-                <p className="text-[12px] text-gray-500 mb-3">Los roles son acumulativos: un Encargado puede ejercer también como Semi-encargado y Camarero básico.</p>
-                <div className="flex items-center gap-0">
-                  {ROLE_ORDER.map((level, i) => {
-                    const role = allRoles.find((r: any) => r.level === level)
-                    const isActive = ROLE_ORDER.indexOf(mainRoleLevel) >= i
-                    return (
-                      <div key={level} className="flex items-center">
-                        <div className={cn(
-                          'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all',
-                          isActive ? 'text-white shadow-sm' : 'bg-gray-100 text-gray-400'
-                        )}
-                          style={isActive ? { backgroundColor: ROLE_COLORS[level] } : {}}>
-                          {isActive && <CheckCircle size={10} />}
-                          {role?.name || level}
-                        </div>
-                        {i < ROLE_ORDER.length - 1 && (
-                          <div className={cn('w-6 h-0.5 mx-0.5', isActive && ROLE_ORDER.indexOf(mainRoleLevel) > i ? 'bg-gray-400' : 'bg-gray-200')} />
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
+                {mainRole ? (
+                  <>
+                    <p className="text-[12px] text-gray-500 mb-3">
+                      Dentro de <strong>{mainRole.group?.name ?? 'su grupo'}</strong> los roles son acumulativos:
+                      puede ejercer el suyo y todos los de rango inferior. Nunca cubre demanda de otro grupo.
+                    </p>
+                    <div className="flex items-center gap-0 flex-wrap">
+                      {rolesOfMainGroup.map((role: any, i: number) => {
+                        const isActive = (role.rank ?? 0) <= (mainRole.rank ?? 0)
+                        return (
+                          <div key={role.id} className="flex items-center">
+                            <div className={cn(
+                              'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all',
+                              isActive ? 'text-white shadow-sm' : 'bg-gray-100 text-gray-400'
+                            )}
+                              style={isActive ? { backgroundColor: role.color } : {}}>
+                              {isActive && <CheckCircle size={10} />}
+                              {role.name}
+                            </div>
+                            {i < rolesOfMainGroup.length - 1 && (
+                              <div className={cn('w-6 h-0.5 mx-0.5',
+                                (role.rank ?? 0) < (mainRole.rank ?? 0) ? 'bg-gray-400' : 'bg-gray-200')} />
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-[12px] text-gray-400">
+                    Sin rol asignado. El solver no podrá planificarle hasta que le asignes uno.
+                  </p>
+                )}
               </div>
             </SectionCard>
 
@@ -539,7 +564,7 @@ export function EmployeeDetailClient({ employee: emp, skills: allSkills, roles: 
           emp={emp}
           allSkills={allSkills}
           allRoles={allRoles}
-          currentRoleLevel={mainRoleLevel}
+          currentRoleId={mainRoleId}
           currentSkillIds={empSkillIds}
           onClose={() => setEditRoles(false)}
           onSaved={() => { setEditRoles(false); router.refresh() }}
@@ -1201,16 +1226,46 @@ function EditContractModal({ emp, contract, preferContinuous: pc, allowSplit: as
 }
 
 // ═══ MODAL: Editar roles y skills ══════════════════════════════════════════════
-function EditRolesModal({ emp, allSkills, allRoles, currentRoleLevel, currentSkillIds, onClose, onSaved }: any) {
+function EditRolesModal({ emp, allSkills, allRoles, currentRoleId, currentSkillIds, onClose, onSaved }: any) {
   const [isPending, startTransition] = useTransition()
-  const [roleLevel, setRoleLevel] = useState(currentRoleLevel)
+  // Se selecciona por ID. Antes se guardaba el `level`, y como varios roles
+  // comparten nivel (Camarero y Cocinero son ambos BASIC) se seleccionaban
+  // todos a la vez y los roles nuevos no se distinguían.
+  const [roleId, setRoleId] = useState<string | null>(currentRoleId ?? null)
   const [skillIds, setSkillIds] = useState<string[]>(currentSkillIds)
 
   function toggleSkill(id: string) {
     setSkillIds(prev => prev.includes(id) ? prev.filter(s => s !== id) : [...prev, id])
   }
 
-  const selectedRole = allRoles.find((r: any) => r.level === roleLevel)
+  // Roles agrupados por familia, cada una ordenada de menor a mayor rango.
+  const grouped = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; color: string; roles: any[] }>()
+    for (const r of allRoles) {
+      const gid = r.groupId ?? r.group?.id ?? '__none__'
+      const prev = map.get(gid) ?? {
+        id: gid,
+        name: r.group?.name ?? 'Sin grupo',
+        color: r.group?.color ?? '#9ca3af',
+        roles: [],
+      }
+      prev.roles.push(r)
+      map.set(gid, prev)
+    }
+    const out = Array.from(map.values())
+    out.sort((a, b) => a.name.localeCompare(b.name))
+    for (const g of out) {
+      g.roles.sort((a: any, b: any) => (a.rank ?? 0) - (b.rank ?? 0) || a.name.localeCompare(b.name))
+    }
+    return out
+  }, [allRoles])
+
+  /** Qué puede cubrir este rol: él mismo y los inferiores DE SU GRUPO. */
+  function coverageDesc(role: any, groupRoles: any[]): string {
+    const below = groupRoles.filter((r: any) => (r.rank ?? 0) < (role.rank ?? 0))
+    if (below.length === 0) return 'Nivel base del grupo — solo su propio rol'
+    return `También puede ejercer como ${below.map((r: any) => r.name).join(', ')}`
+  }
 
   return (
     <Modal title="Roles y etiquetas" wide onClose={onClose}>
@@ -1218,31 +1273,54 @@ function EditRolesModal({ emp, allSkills, allRoles, currentRoleLevel, currentSki
         {/* Rol */}
         <div>
           <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-2">Rol principal</div>
-          <p className="text-[12px] text-gray-500 mb-3">Los roles son acumulativos: un Encargado puede hacer de Camarero y Semi-encargado.</p>
-          <div className="grid grid-cols-2 gap-2">
-            {allRoles.map((role: any) => (
-              <button
-                key={role.id}
-                onClick={() => setRoleLevel(role.level)}
-                className={cn(
-                  'flex items-start gap-3 p-3.5 rounded-xl border-2 text-left transition-all',
-                  roleLevel === role.level
-                    ? 'border-transparent text-white shadow-md'
-                    : 'border-gray-200 bg-white hover:border-gray-300'
-                )}
-                style={roleLevel === role.level ? { backgroundColor: ROLE_COLORS[role.level] } : {}}
-              >
-                <div className="flex-1">
-                  <div className="text-[13px] font-bold">{role.name}</div>
-                  <div className={cn('text-[11px] mt-0.5', roleLevel === role.level ? 'opacity-80' : 'text-gray-400')}>
-                    {role.level === 'BASIC' && 'Solo puede ejercer como camarero básico'}
-                    {role.level === 'SEMI_MANAGER' && 'Puede ejercer como básico y semi-encargado'}
-                    {role.level === 'MANAGER' && 'Puede ejercer todos los roles excepto dueño'}
-                    {role.level === 'OWNER' && 'Acceso completo a todos los roles'}
-                  </div>
+          <p className="text-[12px] text-gray-500 mb-3">
+            Cada empleado pertenece a <strong>un solo grupo</strong>. Dentro de su grupo los roles son
+            acumulativos, pero nunca puede cubrir demanda de otro grupo.
+          </p>
+
+          {grouped.length === 0 && (
+            <p className="text-[12px] text-gray-400 py-3">
+              No hay roles configurados. Créalos en Ajustes → Etiquetas y roles.
+            </p>
+          )}
+
+          <div className="space-y-4">
+            {grouped.map(group => (
+              <div key={group.id}>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: group.color }} />
+                  <span className="text-[11px] font-bold text-gray-600 uppercase tracking-wider">{group.name}</span>
+                  <span className="text-[10px] text-gray-400">
+                    · {group.roles.length} rol{group.roles.length === 1 ? '' : 'es'}
+                  </span>
                 </div>
-                {roleLevel === role.level && <CheckCircle size={16} className="flex-shrink-0 mt-0.5 opacity-80" />}
-              </button>
+                <div className="grid grid-cols-2 gap-2">
+                  {group.roles.map((role: any) => {
+                    const selected = roleId === role.id
+                    return (
+                      <button
+                        key={role.id}
+                        onClick={() => setRoleId(role.id)}
+                        className={cn(
+                          'flex items-start gap-3 p-3.5 rounded-xl border-2 text-left transition-all',
+                          selected
+                            ? 'border-transparent text-white shadow-md'
+                            : 'border-gray-200 bg-white hover:border-gray-300'
+                        )}
+                        style={selected ? { backgroundColor: role.color } : {}}
+                      >
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[13px] font-bold">{role.name}</div>
+                          <div className={cn('text-[11px] mt-0.5', selected ? 'opacity-80' : 'text-gray-400')}>
+                            {coverageDesc(role, group.roles)}
+                          </div>
+                        </div>
+                        {selected && <CheckCircle size={16} className="flex-shrink-0 mt-0.5 opacity-80" />}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
             ))}
           </div>
         </div>
@@ -1277,8 +1355,7 @@ function EditRolesModal({ emp, allSkills, allRoles, currentRoleLevel, currentSki
 
       <ModalFooter onClose={onClose} onSave={() => startTransition(async () => {
         try {
-          const role = allRoles.find((r: any) => r.level === roleLevel)
-          await setEmployeeSkills(emp.id, skillIds, role?.id || null)
+          await setEmployeeSkills(emp.id, skillIds, roleId || null)
           toast.success('Roles y etiquetas guardados ✓')
           onSaved()
         } catch (e: any) { toast.error(e.message) }

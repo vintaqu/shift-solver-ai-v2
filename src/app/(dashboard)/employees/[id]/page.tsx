@@ -13,7 +13,7 @@ export default async function EmployeeDetailPage({ params }: { params: { id: str
     where: { id: params.id },
     include: {
       contracts: { orderBy: { startDate: 'desc' } },
-      skills: { include: { skill: true, laborRole: true } },
+      skills: { include: { skill: true, laborRole: { include: { group: true } } } } as any,
       availabilities: { orderBy: { dayOfWeek: 'asc' } },
       absences: { orderBy: { startDate: 'desc' }, take: 10 },
       assignments: {
