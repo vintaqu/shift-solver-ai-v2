@@ -274,6 +274,8 @@ export interface DraftSlotInput {
   startTime: string
   endTime: string
   isRequired: boolean
+  // Franja sin incorporaciones: nadie puede empezar un turno dentro de ella.
+  noShiftStart?: boolean
   notes?: string | null
   roles: RoleReqInput[]        // desglose por rol (fuente de verdad)
   dateISO: string              // fecha del slot (día concreto de la semana)
@@ -308,6 +310,7 @@ export async function saveWeekCoverage(data: {
           minWorkers: totals.minWorkers,
           idealWorkers: totals.idealWorkers,
           isRequired: s.isRequired,
+          noShiftStart: s.noShiftStart ?? false,
           notes: s.notes || null,
           priority: 1,
         },
@@ -411,6 +414,7 @@ export async function copyWeeksCoverage(data: {
         laborRoleId: s.laborRoleId,
         skillId: s.skillId,
         isRequired: s.isRequired,
+        noShiftStart: (s as any).noShiftStart ?? false,
         notes: s.notes,
         priority: s.priority,
       })),
