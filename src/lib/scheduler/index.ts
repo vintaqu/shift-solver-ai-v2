@@ -116,6 +116,9 @@ export interface ScheduleRequest {
   franjas_num: Record<string, FranjaNum[]>
   franjas_rol: Record<string, FranjaRol[]>
   franjas_eti: Record<string, FranjaEti[]>
+  // Franjas en las que nadie puede incorporarse al trabajo (picos de servicio).
+  // Terminar un turno dentro de ellas sí está permitido.
+  franjas_sin_incorporaciones?: Record<string, { inicio: string; fin: string }[]>
   parametros: Parametros
 }
 

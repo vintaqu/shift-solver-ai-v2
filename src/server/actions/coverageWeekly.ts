@@ -95,6 +95,7 @@ export async function upsertDateSlot(data: {
   laborRoleId?: string | null
   skillId?: string | null
   isRequired: boolean
+  noShiftStart?: boolean
   notes?: string
 }) {
   const date = toUTCDate(data.dateISO)
@@ -119,12 +120,13 @@ export async function upsertDateSlot(data: {
     laborRoleId: data.laborRoleId || null,
     skillId: data.skillId || null,
     isRequired: data.isRequired,
+    noShiftStart: data.noShiftStart ?? false,
     notes: data.notes || null,
   }
 
   let slot
   if (data.id) {
-    slot = await prisma.coverageRequirement.update({ where: { id: data.id }, data: payload })
+    slot = await prisma.coverageRequirement.update({ where: { id: data.id }, data: payload as any })
   } else {
     // Evitar duplicados: match por fecha + hora inicio
     let existing = await prisma.coverageRequirement.findFirst({
@@ -136,8 +138,8 @@ export async function upsertDateSlot(data: {
       })
     }
     slot = existing
-      ? await prisma.coverageRequirement.update({ where: { id: existing.id }, data: payload })
-      : await prisma.coverageRequirement.create({ data: payload })
+      ? await prisma.coverageRequirement.update({ where: { id: existing.id }, data: payload as any })
+      : await prisma.coverageRequirement.create({ data: payload as any })
   }
 
   await replaceRoleRequirements([slot.id], roles)
@@ -159,6 +161,7 @@ export async function bulkUpsertDateSlots(data: {
   laborRoleId?: string | null
   skillId?: string | null
   isRequired: boolean
+  noShiftStart?: boolean
   notes?: string
 }) {
   const dates = data.datesISO.map(toUTCDate)
@@ -221,6 +224,7 @@ export async function bulkUpsertDateSlots(data: {
           laborRoleId: data.laborRoleId || null,
           skillId: data.skillId || null,
           isRequired: data.isRequired,
+          noShiftStart: data.noShiftStart ?? false,
           notes: data.notes || null,
           priority: 1,
         })
@@ -237,8 +241,9 @@ export async function bulkUpsertDateSlots(data: {
         laborRoleId: data.laborRoleId || null,
         skillId: data.skillId || null,
         isRequired: data.isRequired,
+        noShiftStart: data.noShiftStart ?? false,
         notes: data.notes || null,
-      },
+      } as any,
     })
   }
 

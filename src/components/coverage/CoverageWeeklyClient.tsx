@@ -212,6 +212,7 @@ interface Slot {
   laborRoleId?: string | null
   skillId?: string | null
   isRequired: boolean
+  noShiftStart?: boolean
   notes?: string | null
   laborRole?: any
   roleRequirements?: any[]
@@ -352,13 +353,13 @@ export function CoverageWeeklyClient({
   // ── Mutaciones del borrador (solo estado local; nada al backend) ──────────
 
   // Construye un objeto Slot local a partir de los datos del editor.
-  function buildLocalSlot(date: string, startTime: string, endTime: string, roleRows: any[], isRequired: boolean, notes: string): Slot {
+  function buildLocalSlot(date: string, startTime: string, endTime: string, roleRows: any[], isRequired: boolean, notes: string, noShiftStart = false): Slot {
     const minWorkers = roleRows.reduce((a, r) => a + r.minWorkers, 0)
     const idealWorkers = roleRows.reduce((a, r) => a + r.idealWorkers, 0)
     return {
       id: `draft-${date}-${startTime}-${Math.random().toString(36).slice(2, 8)}`,
       date, startTime, endTime, minWorkers, idealWorkers,
-      isRequired, notes,
+      isRequired, notes, noShiftStart,
       roleRequirements: roleRows.map(r => ({
         laborRoleId: r.laborRoleId,
         minWorkers: r.minWorkers,
@@ -369,13 +370,13 @@ export function CoverageWeeklyClient({
   }
 
   // Aplica un slot (crear/editar) sobre una o varias fechas.
-  function applyDraftSlot(dates: string[], startTime: string, endTime: string, roleRows: any[], isRequired: boolean, notes: string, replaceId?: string) {
+  function applyDraftSlot(dates: string[], startTime: string, endTime: string, roleRows: any[], isRequired: boolean, notes: string, noShiftStart = false, replaceId?: string) {
     setDraftSlots(prev => {
       let next = replaceId ? prev.filter(s => (s as any).id !== replaceId) : [...prev]
       for (const date of dates) {
         // Sobrescribir cualquier slot existente con misma fecha+inicio.
         next = next.filter(s => !(s.date === date && s.startTime === startTime))
-        next.push(buildLocalSlot(date, startTime, endTime, roleRows, isRequired, notes))
+        next.push(buildLocalSlot(date, startTime, endTime, roleRows, isRequired, notes, noShiftStart))
       }
       return next
     })
@@ -383,14 +384,14 @@ export function CoverageWeeklyClient({
   }
 
   // Aplica un rango horario (masivo) partido en franjas de 30 min a varias fechas.
-  function applyDraftBulk(dates: string[], startTime: string, endTime: string, roleRows: any[], isRequired: boolean, notes: string) {
+  function applyDraftBulk(dates: string[], startTime: string, endTime: string, roleRows: any[], isRequired: boolean, notes: string, noShiftStart = false) {
     const franjas = splitIntoHalfHours(startTime, endTime)
     setDraftSlots(prev => {
       let next = [...prev]
       for (const date of dates) {
         for (const f of franjas) {
           next = next.filter(s => !(s.date === date && s.startTime === f.start))
-          next.push(buildLocalSlot(date, f.start, f.end, roleRows, isRequired, notes))
+          next.push(buildLocalSlot(date, f.start, f.end, roleRows, isRequired, notes, noShiftStart))
         }
       }
       return next
@@ -416,6 +417,7 @@ export function CoverageWeeklyClient({
           startTime: s.startTime,
           endTime: s.endTime,
           isRequired: s.isRequired,
+          noShiftStart: (s as any).noShiftStart ?? false,
           notes: s.notes ?? null,
           dateISO: s.date,
           roles: ((s as any).roleRequirements ?? []).map((rr: any) => ({
@@ -447,7 +449,8 @@ export function CoverageWeeklyClient({
     const daysWithSlots = new Set(normalizedSlots.map(s => s.date)).size
     const maxDemand = normalizedSlots.reduce((m, s) => Math.max(m, s.minWorkers), 0)
     const required = normalizedSlots.filter(s => s.isRequired).length
-    return { total: normalizedSlots.length, daysWithSlots, maxDemand, required }
+    const blocked = normalizedSlots.filter(s => (s as any).noShiftStart).length
+    return { total: normalizedSlots.length, daysWithSlots, maxDemand, required, blocked }
   }, [normalizedSlots])
 
   // ── Horas de cobertura necesarias ────────────────────────────────────────
@@ -620,6 +623,12 @@ export function CoverageWeeklyClient({
         <span><strong className="text-emerald-600 text-[14px]">{kpis.daysWithSlots}/7</strong> <span className="text-gray-400">días configurados</span></span>
         <span><strong className="text-amber-600 text-[14px]">{kpis.maxDemand}</strong> <span className="text-gray-400">demanda máxima</span></span>
         <span><strong className="text-red-500 text-[14px]">{kpis.required}</strong> <span className="text-gray-400">slots obligatorios</span></span>
+        {kpis.blocked > 0 && (
+          <span title="Franjas en las que nadie puede incorporarse al trabajo">
+            <strong className="text-amber-600 text-[14px]">🔒 {kpis.blocked}</strong>{' '}
+            <span className="text-gray-400">sin incorporaciones</span>
+          </span>
+        )}
 
         <span className="w-px h-5 bg-gray-200" />
 
@@ -750,7 +759,10 @@ export function CoverageWeeklyClient({
                     style={{ backgroundColor: slot ? colors!.bg : undefined }}
                     onClick={() => slot ? setEditingSlot(slot) : setAddingSlot({ date: dateISO, time })}>
                     {slot ? (
-                      <div className="rounded-lg px-2 py-1.5 min-h-[38px] flex flex-col justify-between relative border h-full"
+                      <div className={cn(
+                          'rounded-lg px-2 py-1.5 min-h-[38px] flex flex-col justify-between relative border h-full',
+                          slot.noShiftStart && 'ring-1 ring-inset ring-amber-400'
+                        )}
                         style={{ borderColor: colors!.border }}>
                         <div className="absolute left-0 top-0 bottom-0 w-1 rounded-l-lg" style={{ backgroundColor: colors!.bar }} />
                         <div className="pl-1.5 flex items-center justify-between gap-1">
@@ -758,7 +770,12 @@ export function CoverageWeeklyClient({
                           {slot.idealWorkers > slot.minWorkers && (
                             <span className="text-[12px] font-semibold" style={{ color: colors!.text, opacity: 0.7 }}>/{slot.idealWorkers}</span>
                           )}
-                          {slot.notes && <span className="text-[9px] text-gray-400 ml-auto" title={slot.notes}>📝</span>}
+                          <span className="ml-auto flex items-center gap-0.5">
+                            {slot.noShiftStart && (
+                              <span className="text-[9px]" title="Sin incorporaciones: nadie puede entrar a trabajar en esta franja">🔒</span>
+                            )}
+                            {slot.notes && <span className="text-[9px] text-gray-400" title={slot.notes}>📝</span>}
+                          </span>
                         </div>
 
                         {/* Barra segmentada por rol: anchura ∝ mínimo de cada rol, color del rol. */}
@@ -812,12 +829,12 @@ export function CoverageWeeklyClient({
           weekDates={weekDates}
           roles={roles}
           onClose={() => { setEditingSlot(null); setAddingSlot(null) }}
-          onApplyOne={(dates: string[], startTime: string, endTime: string, roleRows: any[], isRequired: boolean, notes: string) => {
-            applyDraftSlot(dates, startTime, endTime, roleRows, isRequired, notes, editingSlot ? (editingSlot as any).id : undefined)
+          onApplyOne={(dates: string[], startTime: string, endTime: string, roleRows: any[], isRequired: boolean, notes: string, noShiftStart: boolean) => {
+            applyDraftSlot(dates, startTime, endTime, roleRows, isRequired, notes, noShiftStart, editingSlot ? (editingSlot as any).id : undefined)
             setEditingSlot(null); setAddingSlot(null)
           }}
-          onApplyBulk={(dates: string[], startTime: string, endTime: string, roleRows: any[], isRequired: boolean, notes: string) => {
-            applyDraftBulk(dates, startTime, endTime, roleRows, isRequired, notes)
+          onApplyBulk={(dates: string[], startTime: string, endTime: string, roleRows: any[], isRequired: boolean, notes: string, noShiftStart: boolean) => {
+            applyDraftBulk(dates, startTime, endTime, roleRows, isRequired, notes, noShiftStart)
             setEditingSlot(null); setAddingSlot(null)
           }}
           onDeleteSlot={() => {
@@ -871,6 +888,7 @@ function SlotModal({ slot, defaultDate, defaultTime, weekDates, roles, onClose, 
     startTime: slot?.startTime ?? defaultTime,
     endTime: slot?.endTime ?? nextSlot(defaultTime),
     isRequired: slot?.isRequired ?? true,
+    noShiftStart: slot?.noShiftStart ?? false,
     notes: slot?.notes ?? '',
   })
   // Desglose por rol — fuente de verdad de la demanda del slot.
@@ -981,6 +999,24 @@ function SlotModal({ slot, defaultDate, defaultTime, weekDates, roles, onClose, 
             </div>
           </div>
 
+          {/* Franja sin incorporaciones — bloqueo de entradas en pico de servicio */}
+          <div className={cn('flex items-start gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition-all', form.noShiftStart ? 'border-amber-300 bg-amber-50' : 'border-gray-200 bg-white')}
+            onClick={() => setForm(f => ({ ...f, noShiftStart: !f.noShiftStart }))}>
+            <div className={cn('w-10 h-5 rounded-full transition-all relative flex-shrink-0 mt-0.5', form.noShiftStart ? 'bg-amber-500' : 'bg-gray-300')}>
+              <div className={cn('absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all', form.noShiftStart ? 'left-5' : 'left-0.5')} />
+            </div>
+            <div>
+              <div className={cn('text-[13px] font-semibold', form.noShiftStart ? 'text-amber-800' : 'text-gray-600')}>
+                {form.noShiftStart ? '🔒 Sin incorporaciones' : 'Permite incorporaciones'}
+              </div>
+              <div className="text-[11px] text-gray-500 mt-0.5">
+                {form.noShiftStart
+                  ? 'Nadie puede entrar a trabajar durante esta franja. Salir sí está permitido.'
+                  : 'El solver puede hacer entrar personal en cualquier momento de la franja'}
+              </div>
+            </div>
+          </div>
+
           <Field label="Notas (opcional)">
             <input className={inputCls()} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Ej: Necesita barista, hora pico desayunos…" />
           </Field>
@@ -1018,9 +1054,9 @@ function SlotModal({ slot, defaultDate, defaultTime, weekDates, roles, onClose, 
                 idealWorkers: r.idealWorkers,
               }))
               if (isEdit) {
-                onApplyOne([slot.date], form.startTime, form.endTime, rolesPayload, form.isRequired, form.notes)
+                onApplyOne([slot.date], form.startTime, form.endTime, rolesPayload, form.isRequired, form.notes, form.noShiftStart)
               } else {
-                onApplyBulk(form.dates, form.startTime, form.endTime, rolesPayload, form.isRequired, form.notes)
+                onApplyBulk(form.dates, form.startTime, form.endTime, rolesPayload, form.isRequired, form.notes, form.noShiftStart)
               }
             }}
             className="flex items-center gap-2 px-5 py-2 rounded-xl bg-indigo-600 text-white text-[13px] font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors">

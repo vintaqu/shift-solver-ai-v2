@@ -490,6 +490,9 @@ model CoverageRequirement {
   idealWorkers   Int      // ideal
   priority       Int      @default(1)
   isRequired     Boolean  @default(true)
+  // Si true, durante este slot nadie puede INCORPORARSE al trabajo (ni empezar
+  // jornada ni el 2º tramo de una partida). Terminar sí se permite.
+  noShiftStart   Boolean  @default(false)
   notes          String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt

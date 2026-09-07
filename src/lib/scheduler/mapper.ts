@@ -184,16 +184,19 @@ function mapCoverageToFranjas(slots: any[], defaultRolKey: string): {
   franjas_num: Record<string, FranjaNum[]>
   franjas_rol: Record<string, FranjaRol[]>
   franjas_eti: Record<string, FranjaEti[]>
+  franjas_sin_incorporaciones: Record<string, { inicio: string; fin: string }[]>
 } {
   const franjas_num: Record<string, FranjaNum[]> = {}
   const franjas_rol: Record<string, FranjaRol[]> = {}
   const franjas_eti: Record<string, FranjaEti[]> = {}
+  const franjas_sin_incorporaciones: Record<string, { inicio: string; fin: string }[]> = {}
 
   // Inicializar todos los días
   for (const dia of DIAS_SOLVER) {
     franjas_num[dia] = []
     franjas_rol[dia] = []
     franjas_eti[dia] = []
+    franjas_sin_incorporaciones[dia] = []
   }
 
   // Agrupar slots por día
@@ -280,6 +283,21 @@ function mapCoverageToFranjas(slots: any[], defaultRolKey: string): {
         })
       }
 
+      // ── Franja sin incorporaciones ───────────────────────────────────────
+      // El slot está marcado como pico de servicio: nadie puede entrar a
+      // trabajar durante él. Salir sí está permitido.
+      if (slot.noShiftStart) {
+        const ya = franjas_sin_incorporaciones[dia].some(
+          f => f.inicio === slot.startTime && f.fin === slot.endTime
+        )
+        if (!ya) {
+          franjas_sin_incorporaciones[dia].push({
+            inicio: slot.startTime,
+            fin: slot.endTime,
+          })
+        }
+      }
+
       // ── Etiqueta ─────────────────────────────────────────────────────────
       if (slot.skill) {
         const existing = franjas_eti[dia].find(
@@ -300,7 +318,7 @@ function mapCoverageToFranjas(slots: any[], defaultRolKey: string): {
     }
   }
 
-  return { franjas_num, franjas_rol, franjas_eti }
+  return { franjas_num, franjas_rol, franjas_eti, franjas_sin_incorporaciones }
 }
 
 // ── Construir el ScheduleRequest completo ─────────────────────────────────
@@ -348,7 +366,8 @@ export function buildScheduleRequest(
   ]
   for (const e of ETIQUETAS_CATALOGO) etiquetasSet.add(e)
 
-  const { franjas_num, franjas_rol, franjas_eti } = mapCoverageToFranjas(coverageSlots, defaultRolKey)
+  const { franjas_num, franjas_rol, franjas_eti, franjas_sin_incorporaciones } =
+    mapCoverageToFranjas(coverageSlots, defaultRolKey)
 
   // Aplicar ausencias como días_libres extra en las restricciones de cada trabajador
   const trabajadores = employees.map(emp => {
@@ -376,6 +395,7 @@ export function buildScheduleRequest(
     franjas_num,
     franjas_rol,
     franjas_eti,
+    franjas_sin_incorporaciones,
     parametros: {
       seed: seed ?? null,
       time_limit_seconds: 90,
