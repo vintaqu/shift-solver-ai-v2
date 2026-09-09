@@ -118,6 +118,58 @@ export async function generateSchedule(
   }
 
   // 4. Construir el payload para el solver (con ausencias como días_libres)
+  // 3c. Turnos BLOQUEADOS que se van a conservar.
+  //
+  // Hay que decírselo al solver, no solo reinsertarlos después: si no, planifica
+  // la semana completa como si el trabajador estuviera libre y al añadir encima
+  // los bloqueados acaba con turnos duplicados y el doble de horas.
+  //
+  // La estrategia es sacar esos días del modelo (van como días libres) y
+  // descontar sus horas del objetivo de contrato. Así el solver solo planifica
+  // lo que falta, y no puede entrar en conflicto con las reglas de jornada
+  // partida ni con las franjas sin incorporaciones.
+  const lockedForSolver = options?.keepLocked
+    ? await prisma.scheduleAssignment.findMany({
+        where: { planningPeriodId, isLocked: true },
+        select: { employeeId: true, date: true, startTime: true, endTime: true, breakMinutes: true },
+      })
+    : []
+
+  // employeeId → horas bloqueadas esta semana
+  const lockedHoursByEmployee = new Map<string, number>()
+  // employeeId → set de días de la semana ya ocupados
+  const lockedDaysByEmployee = new Map<string, Set<string>>()
+
+  for (const a of lockedForSolver) {
+    const [sh, sm] = a.startTime.split(':').map(Number)
+    const [eh, em] = a.endTime === '00:00' ? [24, 0] : a.endTime.split(':').map(Number)
+    const mins = Math.max(0, (eh * 60 + em) - (sh * 60 + sm)) - (a.breakMinutes ?? 0)
+    lockedHoursByEmployee.set(
+      a.employeeId,
+      (lockedHoursByEmployee.get(a.employeeId) ?? 0) + mins / 60,
+    )
+
+    const idx = Math.round(
+      (new Date(a.date).getTime() - weekStartDate.getTime()) / (24 * 60 * 60 * 1000)
+    )
+    if (idx >= 0 && idx < 7) {
+      const set = lockedDaysByEmployee.get(a.employeeId) ?? new Set<string>()
+      set.add(DIAS_SOLVER_GEN[idx])
+      lockedDaysByEmployee.set(a.employeeId, set)
+    }
+  }
+
+  // Los días con turno bloqueado salen del modelo, igual que una ausencia.
+  for (const emp of employees) {
+    const dias = lockedDaysByEmployee.get(emp.id)
+    if (!dias || dias.size === 0) continue
+    const solverName = `${emp.firstName.toUpperCase()} ${emp.lastName.toUpperCase()}`
+    if (!absenceBlocks[solverName]) absenceBlocks[solverName] = []
+    for (const dia of dias) {
+      if (!absenceBlocks[solverName].includes(dia)) absenceBlocks[solverName].push(dia)
+    }
+  }
+
   // Catálogo completo de roles con su grupo y rango. Es lo que define las
   // familias y la jerarquía interna que se envían al solver.
   const laborRoles = await prisma.laborRole.findMany({
@@ -133,6 +185,7 @@ export async function generateSchedule(
     options?.seed,
     absenceBlocks,  // ← días bloqueados por ausencias aprobadas
     laborRoles,
+    lockedHoursByEmployee,  // ← horas ya fijadas, se descuentan del contrato
   )
 
   // 4. Llamar a la API OR-Tools
@@ -197,7 +250,13 @@ export async function generateSchedule(
       lockedAssignments.map(a => `${a.employeeId}_${new Date(a.date).toDateString()}`)
     )
 
-    const toCreate = options?.onlyGaps
+    // Red de seguridad contra turnos duplicados.
+    //
+    // Antes este filtro solo se aplicaba con `onlyGaps`, así que al regenerar
+    // con "mantener bloqueados" el solver podía colocar un turno el mismo día
+    // que uno bloqueado y quedaban los dos encima. Con `keepLocked` el día ya
+    // sale del modelo (ver punto 3c), pero el filtro se mantiene por si acaso.
+    const toCreate = (options?.onlyGaps || options?.keepLocked)
       ? assignments.filter(a => !lockedDates.has(`${a.employeeId}_${a.date.toDateString()}`))
       : assignments
 

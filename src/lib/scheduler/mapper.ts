@@ -101,7 +101,7 @@ const HORARIO_APERTURA_DEFAULT: Record<string, HorarioApertura> = {
 
 // ── Mapper: Empleado DB → Trabajador solver ────────────────────────────────
 
-function mapEmployee(emp: any): Trabajador {
+function mapEmployee(emp: any, lockedHours?: Map<string, number>): Trabajador {
   const contract = emp.contracts?.[0]
   // Rol principal del empleado. Cada empleado pertenece a UN solo grupo, así
   // que su rol determina también su familia y, por tanto, qué demanda puede
@@ -175,6 +175,9 @@ function mapEmployee(emp: any): Trabajador {
     solo_continuada: contract ? contract.allowSplit === false : false,
     prefiere_continuada: contract ? contract.preferContinuous !== false : true,
     max_horas_dia: contract?.maxDailyHours ?? undefined,
+    // Horas de turnos bloqueados que se conservan. El solver las descuenta del
+    // objetivo semanal para no volver a planificar lo que ya está fijado.
+    horas_ya_asignadas: lockedHours?.get(emp.id) ?? 0,
   }
 }
 
@@ -330,6 +333,7 @@ export function buildScheduleRequest(
   seed?: number,
   absenceBlocks?: Record<string, string[]>,  // nombre_solver → ['LUNES', 'MARTES', ...]
   laborRoles: any[] = [],                    // catálogo completo con group + rank
+  lockedHours?: Map<string, number>,         // employeeId → horas ya bloqueadas
 ): ScheduleRequest {
   // Familias de roles. Si no llega catálogo (llamada legacy), se deducen de
   // los roles que traen los propios empleados para no romper nada.
@@ -371,7 +375,7 @@ export function buildScheduleRequest(
 
   // Aplicar ausencias como días_libres extra en las restricciones de cada trabajador
   const trabajadores = employees.map(emp => {
-    const trabajador = mapEmployee(emp)
+    const trabajador = mapEmployee(emp, lockedHours)
     const solverName = trabajador.nombre
     const absenceDays = absenceBlocks?.[solverName] ?? []
     if (absenceDays.length > 0) {

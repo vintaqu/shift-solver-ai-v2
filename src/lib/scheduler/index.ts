@@ -53,6 +53,9 @@ export interface Trabajador {
   // Sale del contrato (allowSplit === false). Sustituye al antiguo hardcode
   // por nombre que había dentro del solver.
   solo_continuada?: boolean
+  // Horas ya fijadas esta semana por turnos bloqueados que se conservan.
+  // El solver las descuenta del objetivo de contrato.
+  horas_ya_asignadas?: number
   // Preferencia blanda: penaliza más las partidas de este trabajador sin
   // llegar a prohibirlas. Sale del contrato (preferContinuous).
   prefiere_continuada?: boolean
