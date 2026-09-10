@@ -142,7 +142,12 @@ export function PlannerClientPage({ period, employees: allEmployees, weekDays, a
     if (avails.length === 0) return null
     const dateISO = dateISOForDay(dayIndex)
     for (const av of avails) {
-      const matchesDay = av.dayOfWeek === dayIndex && (av.isRecurring || av.date == null)
+      // `dayOfWeek: null` sin fecha concreta = TODOS LOS DÍAS. Exigir igualdad
+      // exacta dejaba fuera esas restricciones, que el solver sí aplica.
+      const aplicaTodosLosDias = av.dayOfWeek == null && av.date == null
+      const matchesDay =
+        (aplicaTodosLosDias || av.dayOfWeek === dayIndex) &&
+        (av.isRecurring || av.date == null)
       const matchesDate = av.date && new Date(av.date).toISOString().slice(0, 10) === dateISO
       if (!matchesDay && !matchesDate) continue
       if (av.type === 'DAY_OFF') {

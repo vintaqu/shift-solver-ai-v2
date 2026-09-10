@@ -411,7 +411,13 @@ export function DayPlannerClient({
   function getUnavailZones(emp: any): Array<{ start: number; end: number; label: string }> {
     const zones: Array<{ start: number; end: number; label: string }> = []
     for (const av of (emp.availabilities || [])) {
-      const matchesDay = av.dayOfWeek === dowOfDate && (av.isRecurring || av.date == null)
+      // `dayOfWeek: null` (sin fecha concreta) significa TODOS LOS DÍAS. Antes se
+      // exigía coincidencia exacta de día, así que las restricciones de "todos
+      // los días" no se pintaban nunca aunque el solver sí las respeta.
+      const aplicaTodosLosDias = av.dayOfWeek == null && av.date == null
+      const matchesDay =
+        (aplicaTodosLosDias || av.dayOfWeek === dowOfDate) &&
+        (av.isRecurring || av.date == null)
       const matchesDate = av.date && new Date(av.date).toISOString().slice(0, 10) === dateISO
       if (!matchesDay && !matchesDate) continue
 
