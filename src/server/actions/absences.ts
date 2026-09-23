@@ -1,5 +1,6 @@
 'use server'
 
+import { resolveVacationConfig, VACATION_INCLUDE } from '@/lib/contracts/resolve'
 import { revalidatePath } from 'next/cache'
 import { addDays, format } from 'date-fns'
 import { prisma } from '@/lib/prisma'
@@ -12,7 +13,7 @@ export async function getVacationDaysUsed(
 ): Promise<number> {
   const emp = await prisma.employee.findUnique({
     where: { id: employeeId },
-    select: { vacationDaysType: true },
+    include: VACATION_INCLUDE as any,
   })
 
   const absences = await prisma.absenceRequest.findMany({
@@ -25,7 +26,7 @@ export async function getVacationDaysUsed(
     },
   })
 
-  const tipo = (emp?.vacationDaysType ?? 'NATURALES') as 'NATURALES' | 'LABORABLES'
+  const tipo = resolveVacationConfig(emp).vacationDaysType
   return absences.reduce(
     (acc, a) => acc + calcDays(new Date(a.startDate), new Date(a.endDate), tipo),
     0,
@@ -44,12 +45,12 @@ export async function createAbsence(data: {
 }) {
   const emp = await prisma.employee.findUnique({
     where: { id: data.employeeId },
-    select: { vacationDaysType: true, vacationDaysPerYear: true },
+    include: VACATION_INCLUDE as any,
   })
 
   const start = new Date(data.startDate)
   const end   = new Date(data.endDate)
-  const tipo  = (emp?.vacationDaysType ?? 'NATURALES') as 'NATURALES' | 'LABORABLES'
+  const tipo  = resolveVacationConfig(emp).vacationDaysType
   const totalDays = calcDays(start, end, tipo)
 
   // Verificar solapamiento
@@ -79,7 +80,7 @@ export async function createAbsence(data: {
       comment:        data.comment?.trim() || null,
       blocksPlanningPeriods: data.blocksPlanningPeriods ?? true,
     },
-    include: { employee: { include: { user: { select: { id: true } } } } },
+    include: { employee: { include: { user: { select: { id: true } }, ...(VACATION_INCLUDE as any) } } },
   })
 
   revalidatePath('/absences')
@@ -105,7 +106,7 @@ export async function updateAbsence(id: string, data: {
 
   const start = data.startDate ? new Date(data.startDate) : new Date(existing.startDate)
   const end   = data.endDate   ? new Date(data.endDate)   : new Date(existing.endDate)
-  const tipo  = (existing.employee.vacationDaysType ?? 'NATURALES') as 'NATURALES' | 'LABORABLES'
+  const tipo  = resolveVacationConfig(existing.employee).vacationDaysType
   const totalDays = calcDays(start, end, tipo)
 
   const updated = await prisma.absenceRequest.update({
@@ -150,8 +151,9 @@ export async function approveAbsence(id: string, managerNote?: string) {
   if (existing.type === 'VACACIONES') {
     const year  = new Date(existing.startDate).getFullYear()
     const used  = await getVacationDaysUsed(existing.employeeId, year)
-    const total = existing.employee.vacationDaysPerYear ?? 23
-    const tipo  = (existing.employee.vacationDaysType ?? 'NATURALES') as 'NATURALES' | 'LABORABLES'
+    const vac   = resolveVacationConfig(existing.employee)
+    const total = vac.vacationDaysPerYear
+    const tipo  = vac.vacationDaysType
     const thisDays = calcDays(new Date(existing.startDate), new Date(existing.endDate), tipo)
 
     if (used + thisDays > total) {

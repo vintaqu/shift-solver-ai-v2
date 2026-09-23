@@ -25,10 +25,11 @@ interface Props {
   skills: any[]
   roles: any[]
   legalFrameworks: any[]
+  contractTemplates?: any[]
   organizationId: string
 }
 
-export function EmployeesSplitClient({ employees: initial, skills, roles, legalFrameworks, organizationId }: Props) {
+export function EmployeesSplitClient({ employees: initial, skills, roles, legalFrameworks, organizationId, contractTemplates = []}: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [employees, setEmployees] = useState(initial)
@@ -406,6 +407,7 @@ export function EmployeesSplitClient({ employees: initial, skills, roles, legalF
             skills={skills}
             roles={roles}
             legalFrameworks={legalFrameworks}
+            contractTemplates={contractTemplates}
             onUpdated={(updated: any) => {
               setEmployees(prev => prev.map(e => e.id === updated.id ? { ...e, ...updated } : e))
             }}

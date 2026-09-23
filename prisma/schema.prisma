@@ -158,6 +158,7 @@ model Organization {
   billingCustomer  BillingCustomer?
   laborRoles    LaborRole[]
   laborRoleGroups LaborRoleGroup[]
+  contractTemplates ContractTemplate[]
   skills        Skill[]
   shiftTemplates ShiftTemplate[]
   notifications  Notification[]
@@ -259,22 +260,91 @@ model Employee {
   @@index([organizationId, status])
 }
 
+model ContractTemplate {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String                        // "Tiempo completo 40h"
+  description    String?
+  color          String   @default("#6366f1")
+  displayOrder   Int      @default(0)
+  isActive       Boolean  @default(true)       // false = retirada, no asignable a nuevos
+  createdAt      DateTime @default(now())
+
+  organization Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  versions     ContractTemplateVersion[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+// Una versión congelada de una plantilla. Editar una plantilla NO modifica la
+// versión existente: crea una nueva y marca la anterior como no vigente. Los
+// contratos ya firmados siguen apuntando a su versión, así el histórico de
+// cuadrantes, nóminas y validaciones legales no cambia retroactivamente.
+model ContractTemplateVersion {
+  id         String  @id @default(cuid())
+  templateId String
+  version    Int                              // 1, 2, 3...
+  isCurrent  Boolean @default(true)           // solo una vigente por plantilla
+
+  contractType         ContractType
+  weeklyHours          Float
+  minWeeklyHours       Float?                 // horquilla mínima
+  maxWeeklyHours       Float?                 // horquilla máxima
+
+  // Límites legales. null = hereda del convenio (no se duplica el valor).
+  maxDailyHours        Float?
+  minRestBetweenShifts Float?
+  maxConsecutiveDays   Int?
+  annualMaxHours       Float?
+
+  // Vacaciones. null = hereda del convenio.
+  vacationDaysPerYear  Int?
+  vacationDaysType     String?                // "NATURALES" | "LABORABLES"
+
+  // Jornada
+  preferContinuous     Boolean @default(true)
+  allowSplit           Boolean @default(true)
+
+  legalFrameworkId     String?                // convenio aplicable
+  notes                String?
+  createdAt            DateTime @default(now())
+
+  template       ContractTemplate   @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  legalFramework LegalFramework?    @relation("ContractTemplateFramework", fields: [legalFrameworkId], references: [id])
+  contracts      EmployeeContract[]
+
+  @@unique([templateId, version])
+  @@index([templateId, isCurrent])
+}
+
 model EmployeeContract {
   id                    String       @id @default(cuid())
   employeeId            String
+  // Versión de plantilla asignada. Es la ÚNICA fuente de las condiciones del
+  // contrato: horas, horquilla, límites y vacaciones. No hay excepciones por
+  // empleado — para condiciones distintas se crea otra plantilla.
+  templateVersionId     String?
+
+  // ── LEGACY ────────────────────────────────────────────────────────────────
+  // Duplicaban lo que ya define el convenio o la plantilla. Ya no se leen: el
+  // código usa resolveContract(). Se conservan hasta validar la migración en
+  // producción; el SQL trae un bloque DROP opcional al final.
   contractType          ContractType
-  weeklyHours           Float        // horas semanales contratadas
-  minWeeklyHours        Float?       // horquilla mínima
-  maxWeeklyHours        Float?       // horquilla máxima
+  weeklyHours           Float
+  minWeeklyHours        Float?
+  maxWeeklyHours        Float?
   maxDailyHours         Float        @default(9)
-  preferContinuous      Boolean      @default(true)  // preferencia blanda: evitar partidas
-  allowSplit            Boolean      @default(true)  // si false, el solver NUNCA le parte la jornada
+  preferContinuous      Boolean      @default(true)
+  allowSplit            Boolean      @default(true)
   maxConsecutiveDays    Int          @default(6)
-  minRestBetweenShifts  Float        @default(12) // horas
+  minRestBetweenShifts  Float        @default(12)
   annualMaxHours        Float        @default(1791)
-  hourlyWage            Float?
+  collectiveAgreement   String?
+  // ──────────────────────────────────────────────────────────────────────────
+
+  hourlyWage            Float?       // individual: no viaja en la plantilla
   hourlyCost            Float?
-  collectiveAgreement   String?      // convenio aplicable
   startDate             DateTime
   endDate               DateTime?
   isActive              Boolean      @default(true)
@@ -282,10 +352,12 @@ model EmployeeContract {
   createdAt             DateTime     @default(now())
   updatedAt             DateTime     @updatedAt
 
-  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  employee        Employee                 @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  templateVersion ContractTemplateVersion? @relation(fields: [templateVersionId], references: [id])
 
   @@index([employeeId])
   @@index([employeeId, isActive])
+  @@index([templateVersionId])
 }
 
 // ============================================================
@@ -416,8 +488,9 @@ model LegalFramework {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  organizations OrganizationLegalFramework[]
-  employees     Employee[]                   @relation("EmployeeLegalFramework")
+  organizations     OrganizationLegalFramework[]
+  employees         Employee[]                   @relation("EmployeeLegalFramework")
+  templateVersions  ContractTemplateVersion[]    @relation("ContractTemplateFramework")
 
   @@index([code])
   @@index([isActive])

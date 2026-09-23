@@ -39,7 +39,15 @@ export default async function CoveragePage({ searchParams }: { searchParams: { w
         contracts: {
           where: { isActive: true },
           take: 1,
-          select: { weeklyHours: true, minWeeklyHours: true, maxWeeklyHours: true },
+          select: {
+            weeklyHours: true, minWeeklyHours: true, maxWeeklyHours: true,
+            templateVersion: {
+              select: {
+                weeklyHours: true, minWeeklyHours: true, maxWeeklyHours: true,
+                template: { select: { id: true, name: true, color: true } },
+              },
+            },
+          },
         },
       } as any,
       orderBy: [{ displayOrder: 'asc' }, { firstName: 'asc' }] as any,

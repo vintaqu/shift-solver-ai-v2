@@ -506,11 +506,15 @@ export function CoverageWeeklyClient({
     for (const e of inWeek) {
       const c = e.contracts?.[0]
       if (!c) continue
+      // Las horas vienen de la plantilla asignada. El campo suelto del contrato
+      // es legacy y solo se usa como respaldo para datos sin migrar.
+      const v = (c as any).templateVersion ?? null
+      const w = v?.weeklyHours ?? c.weeklyHours ?? 0
+      if (!w) continue
       withContract++
-      const w = c.weeklyHours ?? 0
       contracted += w
-      minHours += c.minWeeklyHours ?? w
-      maxHours += c.maxWeeklyHours ?? w
+      minHours += (v?.minWeeklyHours ?? c.minWeeklyHours) ?? w
+      maxHours += (v?.maxWeeklyHours ?? c.maxWeeklyHours) ?? w
     }
 
     return {

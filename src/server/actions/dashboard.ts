@@ -51,7 +51,7 @@ export async function getDashboardData(organizationId: string, locationId: strin
         ],
       } as any,
       include: {
-        contracts: { where: { isActive: true }, take: 1 },
+        contracts: { where: { isActive: true }, take: 1, include: { templateVersion: { include: { template: true } } } },
         skills: { include: { laborRole: true } },
       },
       orderBy: { firstName: 'asc' },

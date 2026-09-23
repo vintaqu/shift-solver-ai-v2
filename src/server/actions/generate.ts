@@ -63,7 +63,7 @@ export async function generateSchedule(
   const allEmployees = await prisma.employee.findMany({
     where: { organizationId: period.organizationId, status: 'ACTIVE' as any },
     include: {
-      contracts: { where: { isActive: true }, orderBy: { startDate: 'desc' }, take: 1 },
+      contracts: { where: { isActive: true }, orderBy: { startDate: 'desc' }, take: 1, include: { templateVersion: { include: { template: true } } } },
       skills: { include: { skill: true, laborRole: true } },
       availabilities: true,
     },

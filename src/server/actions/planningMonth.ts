@@ -92,7 +92,10 @@ export async function getMonthData(
         contracts: {
           where: { isActive: true },
           take: 1,
-          select: { weeklyHours: true },
+          select: {
+            weeklyHours: true,
+            templateVersion: { select: { weeklyHours: true } },
+          },
         },
       },
       orderBy: [{ firstName: 'asc' }],

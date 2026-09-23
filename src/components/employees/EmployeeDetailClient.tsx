@@ -10,6 +10,8 @@ import {
   ChevronDown, Lock, Sun, Moon, Repeat
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { resolveActiveContract, resolveContract, type ResolvedContract } from '@/lib/contracts/resolve'
+import { assignContractTemplate } from '@/server/actions/contractTemplates'
 import { employeeColor, primaryRoleOf } from '@/lib/employee-color'
 import { RoleExtraBadge } from './RoleExtraBadge'
 import {
@@ -64,12 +66,18 @@ function Field({ label, hint, error, children }: any) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-export function EmployeeDetailClient({ employee: emp, skills: allSkills, roles: allRoles, legalFrameworks = [], onUpdated }: any) {
+export function EmployeeDetailClient({ employee: emp, skills: allSkills, roles: allRoles, legalFrameworks = [], contractTemplates = [], onUpdated }: any) {
   const router = useRouter()
   const [showDelete, setShowDelete] = useState(false)
   const [tab, setTab] = useState<'info' | 'contract' | 'roles' | 'restrictions' | 'history'>('info')
   const [editInfo, setEditInfo] = useState(false)
   const [editContract, setEditContract] = useState(false)
+  // Condiciones efectivas: plantilla → convenio → defecto. Ninguna se guarda
+  // duplicada en el empleado.
+  const resolved = useMemo(
+    () => resolveActiveContract(emp, (emp as any).legalFramework?.rules ?? null),
+    [emp]
+  ) ?? resolveContract(null, null)
   const [editRoles, setEditRoles] = useState(false)
   const [restrictionModal, setRestrictionModal] = useState<null | 'create' | any>(null)
   const [isPending, startTransition] = useTransition()
@@ -235,40 +243,64 @@ export function EmployeeDetailClient({ employee: emp, skills: allSkills, roles: 
                   title="Contrato activo"
                   action={<EditBtn onClick={() => setEditContract(true)} />}
                 >
+                  {/* Las condiciones ya no se editan aquí: vienen de la
+                      plantilla. Cada fila indica de qué capa sale el valor. */}
+                  <div className="flex items-center gap-2.5 mb-3 pb-3 border-b border-gray-100">
+                    <span className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0"
+                      style={{ backgroundColor: resolved.templateColor ?? '#9ca3af' }}>
+                      {(resolved.templateName ?? '?')[0]}
+                    </span>
+                    <div className="min-w-0">
+                      <div className="text-[13px] font-bold text-gray-800">
+                        {resolved.templateName ?? 'Sin plantilla asignada'}
+                        {resolved.templateVersion != null && (
+                          <span className="ml-1.5 text-[10px] font-mono text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">
+                            v{resolved.templateVersion}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[11px] text-gray-400">
+                        {resolved.templateName
+                          ? 'Las condiciones se configuran en Ajustes → Contratos'
+                          : 'Asígnale una plantilla para que el solver pueda planificarle'}
+                      </div>
+                    </div>
+                  </div>
+
                   <InfoGrid rows={[
-                    { label: 'Tipo de contrato', value: CONTRACT_TYPES.find(c => c.value === contract.contractType)?.label || contract.contractType },
-                    { label: 'Horas semanales', value: `${contract.weeklyHours}h/sem` },
-                    { label: 'Horquilla horaria', value: contract.minWeeklyHours && contract.maxWeeklyHours ? `${contract.minWeeklyHours}h – ${contract.maxWeeklyHours}h` : 'Sin horquilla' },
-                    { label: 'Máx. horas/día', value: `${contract.maxDailyHours}h (convenio: 9h)` },
-                    { label: 'Descanso mínimo entre jornadas', value: `${contract.minRestBetweenShifts}h (convenio: 12h)` },
-                    { label: 'Máx. días consecutivos', value: `${contract.maxConsecutiveDays} días` },
-                    { label: 'Horas anuales máximas', value: `${contract.annualMaxHours}h (convenio: 1.791h)` },
-                    { label: 'Convenio aplicable', value: contract.collectiveAgreement || 'Hostelería Tarragona' },
-                    { label: 'Coste/hora', value: contract.hourlyWage ? `${contract.hourlyWage}€/h` : '—' },
+                    { label: 'Tipo de contrato', value: CONTRACT_TYPES.find(c => c.value === resolved.contractType)?.label || resolved.contractType },
+                    { label: 'Horas semanales', value: `${resolved.weeklyHours}h/sem` },
+                    { label: 'Horquilla horaria', value: resolved.minWeeklyHours && resolved.maxWeeklyHours ? `${resolved.minWeeklyHours}h – ${resolved.maxWeeklyHours}h` : 'Sin horquilla' },
+                    { label: 'Máx. horas/día', value: `${resolved.maxDailyHours}h${origenTxt(resolved, 'maxDailyHours')}` },
+                    { label: 'Descanso mínimo entre jornadas', value: `${resolved.minRestBetweenShifts}h${origenTxt(resolved, 'minRestBetweenShifts')}` },
+                    { label: 'Máx. días consecutivos', value: `${resolved.maxConsecutiveDays} días${origenTxt(resolved, 'maxConsecutiveDays')}` },
+                    { label: 'Horas anuales máximas', value: `${resolved.annualMaxHours}h${origenTxt(resolved, 'annualMaxHours')}` },
+                    { label: 'Vacaciones', value: `${resolved.vacationDaysPerYear} días ${resolved.vacationDaysType === 'LABORABLES' ? 'laborables' : 'naturales'}${origenTxt(resolved, 'vacationDaysPerYear')}` },
+                    { label: 'Coste/hora', value: resolved.hourlyWage ? `${resolved.hourlyWage}€/h` : '—' },
                     { label: 'Vigencia', value: `Desde ${new Date(contract.startDate).toLocaleDateString('es-ES')}${contract.endDate ? ` hasta ${new Date(contract.endDate).toLocaleDateString('es-ES')}` : ' (indefinido)'}` },
                   ]} />
                 </SectionCard>
-
-                <VacationConfigCard emp={emp} onSaved={() => router.refresh()} />
 
                 <LegalFrameworkCard emp={emp} allRoles={allRoles} legalFrameworks={legalFrameworks} onSaved={() => router.refresh()} />
 
                 <SectionCard title="Preferencias de jornada">
                   <div className="space-y-3">
                     <PreferencePill
-                      active={preferContinuous}
+                      active={resolved.preferContinuous}
                       icon="🔄"
                       label="Preferencia por jornada continua"
                       desc="Se intentará asignar turnos sin partir siempre que sea posible"
                     />
                     <PreferencePill
-                      active={allowSplit}
+                      active={resolved.allowSplit}
                       icon="✂️"
                       label="Acepta jornadas partidas"
-                      desc="Puede trabajar en dos tramos (3–5h por tramo, 3–5h de descanso entre ellos). Si se desactiva, el solver nunca le partirá la jornada."
+                      desc="Puede trabajar en dos tramos. Si se desactiva, el solver nunca le partirá la jornada."
                     />
                     <div className="text-[11px] text-gray-400 bg-gray-50 rounded-xl p-3 border border-gray-200">
-                      📋 <strong>Convenio hostelería Tarragona:</strong> Jornada partida → mínimo 3h por tramo, máximo 5h por tramo, descanso entre tramos entre 3h y 5h, total diario ≤ 9h ordinarias.
+                      📋 Estas preferencias vienen de la plantilla
+                      {resolved.templateName ? ` «${resolved.templateName}»` : ''}. Para cambiarlas,
+                      edita la plantilla en Ajustes → Contratos o asígnale otra.
                     </div>
                   </div>
                 </SectionCard>
@@ -549,11 +581,11 @@ export function EmployeeDetailClient({ employee: emp, skills: allSkills, roles: 
       )}
 
       {editContract && (
-        <EditContractModal
+        <AssignTemplateModal
           emp={emp}
           contract={contract}
-          preferContinuous={preferContinuous}
-          allowSplit={allowSplit}
+          resolved={resolved}
+          templates={contractTemplates}
           onClose={() => setEditContract(false)}
           onSaved={() => { setEditContract(false); router.refresh() }}
         />
@@ -1061,163 +1093,92 @@ function EditInfoModal({ emp, onClose, onSaved }: any) {
 }
 
 // ═══ MODAL: Editar contrato ═══════════════════════════════════════════════════
-function EditContractModal({ emp, contract, preferContinuous: pc, allowSplit: as_, onClose, onSaved }: any) {
+// Asignación de plantilla. Ya no se editan condiciones aquí: se elige una de
+// las plantillas de la organización. Al guardar se cierra el contrato anterior
+// y se abre uno nuevo, de modo que quede rastro del cambio de condiciones.
+function AssignTemplateModal({ emp, contract, resolved, templates = [], onClose, onSaved }: any) {
   const [isPending, startTransition] = useTransition()
-  const [form, setForm] = useState({
-    contractType: contract?.contractType || 'FULL_TIME',
-    weeklyHours: contract?.weeklyHours || 40,
-    hasRange: !!(contract?.minWeeklyHours),
-    minWeeklyHours: contract?.minWeeklyHours || 36,
-    maxWeeklyHours: contract?.maxWeeklyHours || 44,
-    maxDailyHours: contract?.maxDailyHours || 9,
-    maxConsecutiveDays: contract?.maxConsecutiveDays || 6,
-    minRestBetweenShifts: contract?.minRestBetweenShifts || 12,
-    annualMaxHours: contract?.annualMaxHours || 1791,
-    preferContinuous: pc,
-    allowSplit: as_,
-    hourlyWage: contract?.hourlyWage || '',
-    collectiveAgreement: contract?.collectiveAgreement || 'Hostelería Tarragona',
-    startDate: contract?.startDate ? new Date(contract.startDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-    endDate: contract?.endDate ? new Date(contract.endDate).toISOString().split('T')[0] : '',
-  })
+  const [templateId, setTemplateId] = useState<string>(resolved?.templateId ?? '')
+  const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0])
+  const [hourlyWage, setHourlyWage] = useState(contract?.hourlyWage ?? '')
 
-  function Toggle({ label, desc, value, onChange }: any) {
-    return (
-      <div className="flex items-start gap-3 p-3 rounded-xl border border-gray-200 cursor-pointer hover:border-indigo-300 transition-colors" onClick={() => onChange(!value)}>
-        <div className={cn('w-10 h-5 rounded-full transition-all relative flex-shrink-0 mt-0.5', value ? 'bg-indigo-600' : 'bg-gray-300')}>
-          <div className={cn('absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all', value ? 'left-5' : 'left-0.5')} />
-        </div>
-        <div>
-          <div className="text-[13px] font-medium text-gray-700">{label}</div>
-          <div className="text-[11px] text-gray-400 mt-0.5">{desc}</div>
-        </div>
-      </div>
-    )
-  }
+  const asignables = templates.filter((t: any) => t.isActive || t.id === resolved?.templateId)
+  const elegida = templates.find((t: any) => t.id === templateId)
+  const v = elegida?.current
+  const cambia = templateId && templateId !== resolved?.templateId
 
   return (
-    <Modal title={contract ? 'Editar contrato' : 'Crear contrato'} wide onClose={onClose}>
-      <div className="space-y-5">
+    <Modal title="Contrato del empleado" onClose={onClose}>
+      <div className="space-y-4">
+        {asignables.length === 0 ? (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[12px] text-amber-800">
+            No hay plantillas de contrato creadas. Ve a Ajustes → Contratos y crea una primero.
+          </div>
+        ) : (
+          <>
+            <Field label="Plantilla de contrato">
+              <select className={inputCls()} value={templateId}
+                onChange={e => setTemplateId(e.target.value)}>
+                <option value="">Selecciona una plantilla…</option>
+                {asignables.map((t: any) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name} · {t.current?.weeklyHours}h/sem{t.isActive ? '' : ' (retirada)'}
+                  </option>
+                ))}
+              </select>
+            </Field>
 
-        {/* Tipo y horas */}
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Tipo de contrato">
-            <select className={inputCls()} value={form.contractType} onChange={e => setForm((f: any) => ({ ...f, contractType: e.target.value }))}>
-              {CONTRACT_TYPES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
-            </select>
-          </Field>
-          <Field label="Horas semanales" hint="Horas del contrato">
-            <div className="flex items-center gap-2">
-              <input type="number" min={1} max={48} className={inputCls()} value={form.weeklyHours}
-                onChange={e => setForm((f: any) => ({ ...f, weeklyHours: +e.target.value }))} />
-              <span className="text-[12px] text-gray-400 whitespace-nowrap">h/sem</span>
-            </div>
-          </Field>
-        </div>
-
-        {/* Horquilla */}
-        <div>
-          <Toggle
-            label="Horquilla horaria (horas variables)"
-            desc="Permite que el sistema use más o menos horas que las del contrato para ajustar el cuadrante"
-            value={form.hasRange}
-            onChange={(v: boolean) => setForm((f: any) => ({ ...f, hasRange: v }))}
-          />
-          {form.hasRange && (
-            <div className="grid grid-cols-2 gap-3 mt-3 pl-3 border-l-2 border-indigo-200">
-              <Field label="Mínimo obligatorio">
-                <div className="flex items-center gap-2">
-                  <input type="number" min={1} max={48} className={inputCls()} value={form.minWeeklyHours}
-                    onChange={e => setForm((f: any) => ({ ...f, minWeeklyHours: +e.target.value }))} />
-                  <span className="text-[12px] text-gray-400">h</span>
+            {v && (
+              <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-1">
+                <div className="text-[11px] font-bold text-gray-600 uppercase tracking-wider mb-1.5">
+                  Condiciones de {elegida.name} (v{v.version})
                 </div>
+                {[
+                  ['Horas semanales', `${v.weeklyHours}h`],
+                  ['Horquilla', v.minWeeklyHours != null && v.maxWeeklyHours != null ? `${v.minWeeklyHours}–${v.maxWeeklyHours}h` : 'Sin horquilla'],
+                  ['Máx. horas/día', v.maxDailyHours != null ? `${v.maxDailyHours}h` : 'Del convenio'],
+                  ['Vacaciones', v.vacationDaysPerYear != null ? `${v.vacationDaysPerYear} días` : 'Del convenio'],
+                  ['Jornada partida', v.allowSplit ? 'Permitida' : 'No permitida'],
+                ].map(([k, val]) => (
+                  <div key={k} className="flex items-center justify-between text-[12px]">
+                    <span className="text-gray-500">{k}</span>
+                    <span className="font-semibold text-gray-700">{val}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Vigente desde">
+                <input type="date" className={inputCls()} value={startDate}
+                  onChange={e => setStartDate(e.target.value)} />
               </Field>
-              <Field label="Máximo utilizable">
-                <div className="flex items-center gap-2">
-                  <input type="number" min={1} max={48} className={inputCls()} value={form.maxWeeklyHours}
-                    onChange={e => setForm((f: any) => ({ ...f, maxWeeklyHours: +e.target.value }))} />
-                  <span className="text-[12px] text-gray-400">h</span>
-                </div>
+              <Field label="Coste/hora (€)">
+                <input type="number" step="0.01" className={inputCls()} value={hourlyWage}
+                  onChange={e => setHourlyWage(e.target.value as any)} placeholder="Opcional" />
               </Field>
             </div>
-          )}
-        </div>
 
-        {/* Límites legales */}
-        <div>
-          <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-2">Límites legales (convenio)</div>
-          <div className="grid grid-cols-3 gap-3">
-            <Field label="Máx. horas/día" hint="Convenio: 9h">
-              <input type="number" min={4} max={12} className={inputCls()} value={form.maxDailyHours}
-                onChange={e => setForm((f: any) => ({ ...f, maxDailyHours: +e.target.value }))} />
-            </Field>
-            <Field label="Descanso entre jornadas" hint="Convenio: 12h">
-              <input type="number" min={10} max={24} className={inputCls()} value={form.minRestBetweenShifts}
-                onChange={e => setForm((f: any) => ({ ...f, minRestBetweenShifts: +e.target.value }))} />
-            </Field>
-            <Field label="Máx. días seguidos" hint="Recomendado: 6">
-              <input type="number" min={1} max={7} className={inputCls()} value={form.maxConsecutiveDays}
-                onChange={e => setForm((f: any) => ({ ...f, maxConsecutiveDays: +e.target.value }))} />
-            </Field>
-          </div>
-          <div className="mt-3">
-            <Field label="Horas anuales máximas" hint="Convenio hostelería Tarragona: 1.791h">
-              <input type="number" className={inputCls()} value={form.annualMaxHours}
-                onChange={e => setForm((f: any) => ({ ...f, annualMaxHours: +e.target.value }))} />
-            </Field>
-          </div>
-        </div>
-
-        {/* Preferencias jornada */}
-        <div>
-          <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-2">Preferencias de jornada</div>
-          <div className="space-y-2">
-            <Toggle
-              label="Preferir jornada continua"
-              desc="El sistema intentará no partir su jornada cuando sea posible"
-              value={form.preferContinuous}
-              onChange={(v: boolean) => setForm((f: any) => ({ ...f, preferContinuous: v }))}
-            />
-            <Toggle
-              label="Acepta jornadas partidas"
-              desc="Tramos 3–5h, ≥1.5h de descanso entre ellos, total ≤9h/día"
-              value={form.allowSplit}
-              onChange={(v: boolean) => setForm((f: any) => ({ ...f, allowSplit: v }))}
-            />
-          </div>
-        </div>
-
-        {/* Datos económicos */}
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Coste/hora (€)" hint="Para estimaciones de coste">
-            <input type="number" step="0.01" className={inputCls()} value={form.hourlyWage}
-              onChange={e => setForm((f: any) => ({ ...f, hourlyWage: e.target.value }))} placeholder="Ej: 12.50" />
-          </Field>
-          <Field label="Convenio colectivo">
-            <input className={inputCls()} value={form.collectiveAgreement}
-              onChange={e => setForm((f: any) => ({ ...f, collectiveAgreement: e.target.value }))} />
-          </Field>
-        </div>
-
-        {/* Vigencia */}
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Fecha inicio"><input type="date" className={inputCls()} value={form.startDate} onChange={e => setForm((f: any) => ({ ...f, startDate: e.target.value }))} /></Field>
-          <Field label="Fecha fin (opcional)"><input type="date" className={inputCls()} value={form.endDate} onChange={e => setForm((f: any) => ({ ...f, endDate: e.target.value }))} /></Field>
-        </div>
+            {cambia && contract && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[11px] text-amber-800 leading-snug">
+                Se cerrará el contrato actual con fecha {new Date(startDate).toLocaleDateString('es-ES')} y
+                se abrirá uno nuevo. El histórico de cuadrantes anteriores no cambia.
+              </div>
+            )}
+          </>
+        )}
       </div>
 
       <ModalFooter onClose={onClose} onSave={() => startTransition(async () => {
         try {
-          await upsertContract({
-            id: contract?.id,
+          if (!templateId) { toast.error('Selecciona una plantilla'); return }
+          await assignContractTemplate({
             employeeId: emp.id,
-            ...form,
-            minWeeklyHours: form.hasRange ? form.minWeeklyHours : null,
-            maxWeeklyHours: form.hasRange ? form.maxWeeklyHours : null,
-            hourlyWage: form.hourlyWage ? +form.hourlyWage : null,
-            endDate: form.endDate || null,
+            templateId,
+            startDate,
+            hourlyWage: hourlyWage === '' ? null : Number(hourlyWage),
           })
-          toast.success('Contrato guardado ✓')
+          toast.success('Contrato actualizado')
           onSaved()
         } catch (e: any) { toast.error(e.message) }
       })} isPending={isPending} />
@@ -1225,7 +1186,6 @@ function EditContractModal({ emp, contract, preferContinuous: pc, allowSplit: as
   )
 }
 
-// ═══ MODAL: Editar roles y skills ══════════════════════════════════════════════
 function EditRolesModal({ emp, allSkills, allRoles, currentRoleId, currentSkillIds, onClose, onSaved }: any) {
   const [isPending, startTransition] = useTransition()
   // Se selecciona por ID. Antes se guardaba el `level`, y como varios roles
@@ -1735,4 +1695,12 @@ function DeleteEmployeeModal({
       </div>
     </div>
   )
+}
+
+/** Marca de dónde sale un límite, para que no parezca un dato duplicado. */
+function origenTxt(r: ResolvedContract, campo: string): string {
+  const o = r.origen?.[campo]
+  if (o === 'convenio') return ' (del convenio)'
+  if (o === 'defecto') return ' (por defecto)'
+  return ''
 }

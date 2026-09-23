@@ -52,7 +52,7 @@ export default async function DayPlanningPage({ params }: { params: { date: stri
   const employees = await prisma.employee.findMany({
     where: { organizationId, status: 'ACTIVE' as any },
     include: {
-      contracts: { where: { isActive: true }, take: 1 },
+      contracts: { where: { isActive: true }, take: 1, include: { templateVersion: { include: { template: true } } } },
       skills: { include: { skill: true, laborRole: true } },
       availabilities: true,
     },

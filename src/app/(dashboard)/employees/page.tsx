@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic'
 
 import { prisma } from '@/lib/prisma'
 import { requireOrgContext } from '@/lib/session'
+import { getContractTemplates } from '@/server/actions/contractTemplates'
 import { getLegalFrameworks } from '@/server/actions/legalFrameworks'
 import { EmployeesSplitClient } from '@/components/employees/EmployeesSplitClient'
 
@@ -9,11 +10,11 @@ export default async function EmployeesPage() {
   const ctx = await requireOrgContext()
   const { organizationId } = ctx
 
-  const [employees, skills, roles, legalFrameworks] = await Promise.all([
+  const [employees, skills, roles, legalFrameworks, contractTemplates] = await Promise.all([
     prisma.employee.findMany({
       where: { organizationId },
       include: {
-        contracts: { orderBy: { startDate: 'desc' } },
+        contracts: { orderBy: { startDate: 'desc' }, include: { templateVersion: { include: { template: true } } } },
         skills: { include: { skill: true, laborRole: true } },
         availabilities: { orderBy: { dayOfWeek: 'asc' } },
         legalFramework: true,
@@ -31,6 +32,7 @@ export default async function EmployeesPage() {
     prisma.skill.findMany({ where: { organizationId } }),
     prisma.laborRole.findMany({ where: { organizationId }, include: { group: true } as any, orderBy: [{ rank: 'asc' }, { name: 'asc' }] as any }),
     getLegalFrameworks(),
+    getContractTemplates(organizationId),
   ])
 
   return (
@@ -39,6 +41,7 @@ export default async function EmployeesPage() {
       skills={JSON.parse(JSON.stringify(skills))}
       roles={JSON.parse(JSON.stringify(roles))}
       legalFrameworks={JSON.parse(JSON.stringify(legalFrameworks))}
+      contractTemplates={JSON.parse(JSON.stringify(contractTemplates))}
       organizationId={organizationId}
     />
   )

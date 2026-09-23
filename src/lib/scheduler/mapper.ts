@@ -4,6 +4,7 @@
 // y ScheduleResponse → ScheduleAssignment[] para guardar en DB
 // ============================================================
 
+import { resolveActiveContract } from '@/lib/contracts/resolve'
 import { addDays, format } from 'date-fns'
 import type {
   ScheduleRequest, ScheduleResponse, Trabajador, Contrato,
@@ -102,7 +103,9 @@ const HORARIO_APERTURA_DEFAULT: Record<string, HorarioApertura> = {
 // ── Mapper: Empleado DB → Trabajador solver ────────────────────────────────
 
 function mapEmployee(emp: any, lockedHours?: Map<string, number>): Trabajador {
-  const contract = emp.contracts?.[0]
+  // Las condiciones salen de la plantilla asignada, no de la fila del contrato.
+  // resolveContract devuelve los mismos nombres de campo de antes.
+  const contract = resolveActiveContract(emp, emp.legalRules ?? null)
   // Rol principal del empleado. Cada empleado pertenece a UN solo grupo, así
   // que su rol determina también su familia y, por tanto, qué demanda puede
   // cubrir: nunca la de otro grupo.

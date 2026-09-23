@@ -25,7 +25,7 @@ export default async function PortalPage() {
     prisma.employee.findUnique({
       where: { id: employeeId },
       include: {
-        contracts: { where: { isActive: true }, take: 1 },
+        contracts: { where: { isActive: true }, take: 1, include: { templateVersion: { include: { template: true } } } },
         skills: { include: { skill: true, laborRole: true } },
         organization: { select: { name: true, logoUrl: true, brandColor: true } },
       },

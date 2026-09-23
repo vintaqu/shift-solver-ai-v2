@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic'
 import { notFound } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { requireOrgContext } from '@/lib/session'
+import { getContractTemplates } from '@/server/actions/contractTemplates'
 import { getLegalFrameworks } from '@/server/actions/legalFrameworks'
 import { EmployeeDetailClient } from '@/components/employees/EmployeeDetailClient'
 
@@ -12,7 +13,7 @@ export default async function EmployeeDetailPage({ params }: { params: { id: str
   const emp = await prisma.employee.findUnique({
     where: { id: params.id },
     include: {
-      contracts: { orderBy: { startDate: 'desc' } },
+      contracts: { orderBy: { startDate: 'desc' }, include: { templateVersion: { include: { template: true } } } },
       skills: { include: { skill: true, laborRole: { include: { group: true } } } } as any,
       availabilities: { orderBy: { dayOfWeek: 'asc' } },
       absences: { orderBy: { startDate: 'desc' }, take: 10 },
@@ -29,10 +30,11 @@ export default async function EmployeeDetailPage({ params }: { params: { id: str
   // Verificar que el empleado pertenece a la organización del usuario
   if (emp.organizationId !== ctx.organizationId) notFound()
 
-  const [skills, roles, legalFrameworks] = await Promise.all([
+  const [skills, roles, legalFrameworks, contractTemplates] = await Promise.all([
     prisma.skill.findMany({ where: { organizationId: emp.organizationId } }),
     prisma.laborRole.findMany({ where: { organizationId: emp.organizationId }, include: { group: true } as any, orderBy: [{ rank: 'asc' }, { name: 'asc' }] as any }),
     getLegalFrameworks(),
+    getContractTemplates(emp.organizationId),
   ])
 
   return (
@@ -41,6 +43,7 @@ export default async function EmployeeDetailPage({ params }: { params: { id: str
       skills={JSON.parse(JSON.stringify(skills))}
       roles={JSON.parse(JSON.stringify(roles))}
       legalFrameworks={JSON.parse(JSON.stringify(legalFrameworks))}
+      contractTemplates={JSON.parse(JSON.stringify(contractTemplates))}
     />
   )
 }

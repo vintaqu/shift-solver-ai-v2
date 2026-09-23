@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
         include: {
           employee: {
             include: {
-              contracts: { where: { isActive: true }, take: 1 },
+              contracts: { where: { isActive: true }, take: 1, include: { templateVersion: { include: { template: true } } } },
               skills: { include: { laborRole: true } },
             },
           },

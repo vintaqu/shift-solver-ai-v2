@@ -14,6 +14,10 @@ import {
   updateOrganizationBranding
 } from '@/server/actions/auth'
 import {
+  createContractTemplate, updateContractTemplateMeta, createTemplateVersion,
+  migrateEmployeesToCurrentVersion, deleteContractTemplate,
+} from '@/server/actions/contractTemplates'
+import {
   createSkill, updateSkill, deleteSkill, updateLaborRole,
   createRoleGroup, updateRoleGroup, deleteRoleGroup,
   createLaborRole, deleteLaborRole, reorderRolesInGroup,
@@ -41,9 +45,9 @@ function Field({ label, hint, children }: any) {
   )
 }
 
-export function SettingsClient({ organization, members, skills, roles, groups = [], currentUserId, currentUserRole }: any) {
+export function SettingsClient({ organization, members, skills, roles, groups = [], contractTemplates = [], legalFrameworks = [], currentUserId, currentUserRole }: any) {
   const router = useRouter()
-  const [tab, setTab] = useState<'org' | 'users' | 'skills'>('org')
+  const [tab, setTab] = useState<'org' | 'users' | 'skills' | 'contracts'>('org')
 
   const isOwner = ['ORG_OWNER', 'SUPER_ADMIN'].includes(currentUserRole)
 
@@ -63,6 +67,7 @@ export function SettingsClient({ organization, members, skills, roles, groups = 
             { id: 'org',    label: '🏠 Organización' },
             { id: 'users',  label: '👥 Usuarios' },
             { id: 'skills', label: '🏷️ Etiquetas y roles' },
+            { id: 'contracts', label: '📄 Contratos' },
           ] as const).map(t => (
             <button key={t.id} onClick={() => setTab(t.id)}
               className={cn('px-4 py-2 rounded-lg text-[12px] font-semibold transition-all',
@@ -84,6 +89,17 @@ export function SettingsClient({ organization, members, skills, roles, groups = 
             skills={skills}
             roles={roles}
             groups={groups}
+            organizationId={organization.id}
+            isOwner={isOwner}
+            onChanged={() => router.refresh()}
+          />
+        )}
+
+        {/* ── TAB: Plantillas de contrato ── */}
+        {tab === 'contracts' && (
+          <ContractTemplatesTab
+            templates={contractTemplates}
+            frameworks={legalFrameworks}
             organizationId={organization.id}
             isOwner={isOwner}
             onChanged={() => router.refresh()}
@@ -1013,6 +1029,400 @@ function RoleGroupsSection({
             </div>
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+// ─── Plantillas de contrato ──────────────────────────────────────────────────
+// Las condiciones laborales viven aquí, no en cada empleado. Al empleado solo
+// se le asigna una plantilla. Editar las condiciones crea una VERSIÓN nueva:
+// quien ya tenía contrato se queda en la suya hasta que se le migre, para que
+// el histórico de cuadrantes y nóminas no cambie retroactivamente.
+function ContractTemplatesTab({ templates, frameworks, organizationId, isOwner, onChanged }: any) {
+  const [editing, setEditing] = useState<any | null>(null)
+  const [creating, setCreating] = useState(false)
+  const [busy, startBusy] = useTransition()
+
+  function run(fn: () => Promise<any>, ok: string) {
+    startBusy(async () => {
+      try {
+        const r = await fn()
+        toast.success(typeof r?.message === 'string' ? r.message : ok)
+        onChanged()
+      } catch (e: any) { toast.error(e.message) }
+    })
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+        <div className="flex items-start justify-between px-5 py-3.5 border-b border-gray-100">
+          <div>
+            <h3 className="text-[14px] font-bold text-gray-800">Plantillas de contrato</h3>
+            <p className="text-[11px] text-gray-400 mt-0.5">
+              Define aquí las condiciones y asígnalas a los empleados. Los límites que dejes
+              vacíos se heredan del convenio, no se copian.
+            </p>
+          </div>
+          {isOwner && (
+            <button
+              onClick={() => { setCreating(true); setEditing(null) }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 text-white text-[12px] font-semibold hover:bg-indigo-700 transition-colors flex-shrink-0"
+            >
+              <Plus size={13} /> Nueva plantilla
+            </button>
+          )}
+        </div>
+
+        <div className="divide-y divide-gray-100">
+          {templates.length === 0 && (
+            <div className="px-5 py-8 text-center text-[13px] text-gray-400">
+              Aún no hay plantillas. Crea una para poder asignar contratos.
+            </div>
+          )}
+
+          {templates.map((t: any) => {
+            const v = t.current
+            const pendientes = (t.staleVersions ?? []).reduce(
+              (n: number, s: any) => n + (s._count?.contracts ?? 0), 0)
+            return (
+              <div key={t.id} className="px-5 py-4">
+                <div className="flex items-start gap-3">
+                  <span className="w-9 h-9 rounded-xl flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0"
+                    style={{ backgroundColor: t.color }}>
+                    {(t.name || '?')[0]}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[13px] font-bold text-gray-800">{t.name}</span>
+                      <span className="text-[10px] font-mono text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">
+                        v{v?.version ?? 1}
+                      </span>
+                      <span className="text-[10px] text-gray-400">
+                        · {t.employeeCount ?? 0} empleado(s)
+                      </span>
+                      {!t.isActive && (
+                        <span className="text-[10px] font-semibold text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">
+                          Retirada
+                        </span>
+                      )}
+                    </div>
+                    {v && (
+                      <div className="text-[11px] text-gray-500 mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+                        <span>{CONTRACT_TYPE_LABEL[v.contractType] ?? v.contractType}</span>
+                        <span>{v.weeklyHours}h/sem</span>
+                        {v.minWeeklyHours != null && v.maxWeeklyHours != null && (
+                          <span>horquilla {v.minWeeklyHours}–{v.maxWeeklyHours}h</span>
+                        )}
+                        <span>
+                          {v.vacationDaysPerYear != null
+                            ? `${v.vacationDaysPerYear}d vacaciones`
+                            : 'vacaciones del convenio'}
+                        </span>
+                        <span>{v.legalFramework?.name ?? 'sin convenio'}</span>
+                        {!v.allowSplit && <span className="text-amber-600">solo jornada continua</span>}
+                      </div>
+                    )}
+                    {pendientes > 0 && (
+                      <div className="mt-2 flex items-center gap-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                        <AlertCircle size={12} className="flex-shrink-0" />
+                        <span>{pendientes} empleado(s) siguen en una versión anterior.</span>
+                        {isOwner && (
+                          <button
+                            disabled={busy}
+                            onClick={() => run(() => migrateEmployeesToCurrentVersion(t.id), 'Empleados migrados')}
+                            className="font-semibold underline hover:text-amber-900"
+                          >
+                            Migrar a v{v?.version}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  {isOwner && (
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <button
+                        onClick={() => { setEditing(t); setCreating(false) }}
+                        className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-indigo-600 transition-colors"
+                      >
+                        <Pencil size={13} />
+                      </button>
+                      <button
+                        onClick={() => run(() => deleteContractTemplate(t.id), 'Plantilla eliminada')}
+                        className="p-1.5 rounded-lg hover:bg-red-50 text-gray-300 hover:text-red-500 transition-colors"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {(creating || editing) && (
+        <TemplateEditor
+          template={editing}
+          frameworks={frameworks}
+          organizationId={organizationId}
+          onClose={() => { setCreating(false); setEditing(null) }}
+          onSaved={() => { setCreating(false); setEditing(null); onChanged() }}
+        />
+      )}
+    </div>
+  )
+}
+
+const CONTRACT_TYPE_LABEL: Record<string, string> = {
+  FULL_TIME: 'Tiempo completo',
+  PART_TIME: 'Tiempo parcial',
+  OWNER: 'Propietario',
+  EXTRA: 'Extra',
+  TEMPORAL: 'Temporal',
+}
+
+function TemplateEditor({ template, frameworks, organizationId, onClose, onSaved }: any) {
+  const v = template?.current
+  const [isPending, startTransition] = useTransition()
+  const [form, setForm] = useState({
+    name: template?.name ?? '',
+    color: template?.color ?? '#6366f1',
+    description: template?.description ?? '',
+    contractType: v?.contractType ?? 'FULL_TIME',
+    weeklyHours: v?.weeklyHours ?? 40,
+    minWeeklyHours: v?.minWeeklyHours ?? '',
+    maxWeeklyHours: v?.maxWeeklyHours ?? '',
+    maxDailyHours: v?.maxDailyHours ?? '',
+    minRestBetweenShifts: v?.minRestBetweenShifts ?? '',
+    maxConsecutiveDays: v?.maxConsecutiveDays ?? '',
+    annualMaxHours: v?.annualMaxHours ?? '',
+    vacationDaysPerYear: v?.vacationDaysPerYear ?? '',
+    vacationDaysType: v?.vacationDaysType ?? '',
+    preferContinuous: v?.preferContinuous ?? true,
+    allowSplit: v?.allowSplit ?? true,
+    legalFrameworkId: v?.legalFrameworkId ?? '',
+  })
+
+  const num = (x: any) => (x === '' || x == null ? null : Number(x))
+
+  function valores() {
+    return {
+      contractType: form.contractType,
+      weeklyHours: Number(form.weeklyHours),
+      minWeeklyHours: num(form.minWeeklyHours),
+      maxWeeklyHours: num(form.maxWeeklyHours),
+      maxDailyHours: num(form.maxDailyHours),
+      minRestBetweenShifts: num(form.minRestBetweenShifts),
+      maxConsecutiveDays: num(form.maxConsecutiveDays),
+      annualMaxHours: num(form.annualMaxHours),
+      vacationDaysPerYear: num(form.vacationDaysPerYear),
+      vacationDaysType: form.vacationDaysType || null,
+      preferContinuous: form.preferContinuous,
+      allowSplit: form.allowSplit,
+      legalFrameworkId: form.legalFrameworkId || null,
+    }
+  }
+
+  function guardar() {
+    startTransition(async () => {
+      try {
+        if (template) {
+          await updateContractTemplateMeta(template.id, {
+            name: form.name, description: form.description, color: form.color,
+          })
+          const r = await createTemplateVersion(template.id, valores() as any)
+          if (r.created) {
+            toast.success(
+              r.pending > 0
+                ? `Versión v${r.version} creada. ${r.pending} empleado(s) siguen en la anterior.`
+                : `Versión v${r.version} creada`
+            )
+          } else {
+            toast.success('Plantilla actualizada')
+          }
+        } else {
+          await createContractTemplate({
+            organizationId,
+            name: form.name,
+            description: form.description,
+            color: form.color,
+            values: valores() as any,
+          })
+          toast.success('Plantilla creada')
+        }
+        onSaved()
+      } catch (e: any) { toast.error(e.message) }
+    })
+  }
+
+  const inputCls = 'w-full px-3 py-2 rounded-xl border border-gray-200 text-[13px] outline-none focus:border-indigo-400'
+  const heredado = 'Vacío = usa el convenio'
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[620px] my-8">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <div>
+            <h3 className="text-[15px] font-bold text-gray-900">
+              {template ? `Editar ${template.name}` : 'Nueva plantilla de contrato'}
+            </h3>
+            {template && (
+              <p className="text-[11px] text-gray-500 mt-0.5">
+                Cambiar las condiciones creará la versión v{(v?.version ?? 1) + 1}. Los empleados
+                actuales se quedan en la v{v?.version ?? 1} hasta que los migres.
+              </p>
+            )}
+          </div>
+          <button onClick={onClose} className="p-1 rounded-lg hover:bg-gray-100 text-gray-400">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="px-5 py-4 space-y-4 max-h-[65vh] overflow-y-auto">
+          <div className="flex gap-2">
+            <div className="flex-1">
+              <label className="block text-[11px] font-medium text-gray-500 mb-1">Nombre</label>
+              <input autoFocus className={inputCls} value={form.name}
+                onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                placeholder="Tiempo completo 40h" />
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-gray-500 mb-1">Color</label>
+              <input type="color" value={form.color}
+                onChange={e => setForm(f => ({ ...f, color: e.target.value }))}
+                className="w-12 h-[38px] rounded-xl border border-gray-200 cursor-pointer" />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[11px] font-medium text-gray-500 mb-1">Tipo de contrato</label>
+              <select className={inputCls} value={form.contractType}
+                onChange={e => setForm(f => ({ ...f, contractType: e.target.value }))}>
+                {Object.entries(CONTRACT_TYPE_LABEL).map(([k, l]) => (
+                  <option key={k} value={k}>{l}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-gray-500 mb-1">Horas semanales</label>
+              <input type="number" step="0.5" className={inputCls} value={form.weeklyHours}
+                onChange={e => setForm(f => ({ ...f, weeklyHours: e.target.value as any }))} />
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-gray-500 mb-1">Horquilla mínima</label>
+              <input type="number" step="0.5" className={inputCls} value={form.minWeeklyHours}
+                onChange={e => setForm(f => ({ ...f, minWeeklyHours: e.target.value as any }))}
+                placeholder="Opcional" />
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-gray-500 mb-1">Horquilla máxima</label>
+              <input type="number" step="0.5" className={inputCls} value={form.maxWeeklyHours}
+                onChange={e => setForm(f => ({ ...f, maxWeeklyHours: e.target.value as any }))}
+                placeholder="Opcional" />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-[11px] font-medium text-gray-500 mb-1">Convenio aplicable</label>
+            <select className={inputCls} value={form.legalFrameworkId}
+              onChange={e => setForm(f => ({ ...f, legalFrameworkId: e.target.value }))}>
+              <option value="">Sin convenio</option>
+              {frameworks.map((fw: any) => (
+                <option key={fw.id} value={fw.id}>{fw.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="rounded-xl border border-gray-200 p-3">
+            <div className="text-[11px] font-bold text-gray-600 uppercase tracking-wider mb-2">
+              Límites — déjalos vacíos para heredar del convenio
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[11px] font-medium text-gray-500 mb-1">Máx. horas/día</label>
+                <input type="number" step="0.5" className={inputCls} value={form.maxDailyHours}
+                  onChange={e => setForm(f => ({ ...f, maxDailyHours: e.target.value as any }))}
+                  placeholder={heredado} />
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium text-gray-500 mb-1">Descanso entre jornadas (h)</label>
+                <input type="number" step="0.5" className={inputCls} value={form.minRestBetweenShifts}
+                  onChange={e => setForm(f => ({ ...f, minRestBetweenShifts: e.target.value as any }))}
+                  placeholder={heredado} />
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium text-gray-500 mb-1">Máx. días consecutivos</label>
+                <input type="number" className={inputCls} value={form.maxConsecutiveDays}
+                  onChange={e => setForm(f => ({ ...f, maxConsecutiveDays: e.target.value as any }))}
+                  placeholder={heredado} />
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium text-gray-500 mb-1">Horas anuales máximas</label>
+                <input type="number" className={inputCls} value={form.annualMaxHours}
+                  onChange={e => setForm(f => ({ ...f, annualMaxHours: e.target.value as any }))}
+                  placeholder={heredado} />
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium text-gray-500 mb-1">Días de vacaciones</label>
+                <input type="number" className={inputCls} value={form.vacationDaysPerYear}
+                  onChange={e => setForm(f => ({ ...f, vacationDaysPerYear: e.target.value as any }))}
+                  placeholder={heredado} />
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium text-gray-500 mb-1">Cómputo de vacaciones</label>
+                <select className={inputCls} value={form.vacationDaysType}
+                  onChange={e => setForm(f => ({ ...f, vacationDaysType: e.target.value }))}>
+                  <option value="">Del convenio</option>
+                  <option value="NATURALES">Días naturales</option>
+                  <option value="LABORABLES">Días laborables</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            {[
+              { k: 'allowSplit', label: 'Acepta jornadas partidas',
+                desc: 'Si se desactiva, el solver nunca le partirá la jornada' },
+              { k: 'preferContinuous', label: 'Prefiere jornada continua',
+                desc: 'Preferencia blanda: el solver evitará las partidas si puede' },
+            ].map(o => (
+              <div key={o.k}
+                onClick={() => setForm(f => ({ ...f, [o.k]: !(f as any)[o.k] }))}
+                className={cn('flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all',
+                  (form as any)[o.k] ? 'border-indigo-300 bg-indigo-50/50' : 'border-gray-200')}>
+                <div className={cn('w-10 h-5 rounded-full transition-all relative flex-shrink-0 mt-0.5',
+                  (form as any)[o.k] ? 'bg-indigo-500' : 'bg-gray-300')}>
+                  <div className={cn('absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all',
+                    (form as any)[o.k] ? 'left-5' : 'left-0.5')} />
+                </div>
+                <div>
+                  <div className="text-[13px] font-semibold text-gray-700">{o.label}</div>
+                  <div className="text-[11px] text-gray-500 mt-0.5">{o.desc}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 px-5 py-3 bg-gray-50 border-t border-gray-100 rounded-b-2xl">
+          <button onClick={onClose} disabled={isPending}
+            className="px-4 py-2 rounded-xl text-[13px] font-medium text-gray-600 hover:bg-gray-100">
+            Cancelar
+          </button>
+          <button onClick={guardar} disabled={isPending || !form.name.trim() || !(Number(form.weeklyHours) > 0)}
+            className={cn('flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13px] font-semibold transition-colors',
+              !isPending && form.name.trim() && Number(form.weeklyHours) > 0
+                ? 'bg-indigo-600 text-white hover:bg-indigo-700'
+                : 'bg-gray-200 text-gray-400 cursor-not-allowed')}>
+            {isPending ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
+            {template ? 'Guardar' : 'Crear plantilla'}
+          </button>
+        </div>
       </div>
     </div>
   )

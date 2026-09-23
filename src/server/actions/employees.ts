@@ -304,7 +304,7 @@ export async function duplicateEmployee(data: {
   const source = await prisma.employee.findUnique({
     where: { id: data.sourceId },
     include: {
-      contracts: { where: { isActive: true } },
+      contracts: { where: { isActive: true }, include: { templateVersion: { include: { template: true } } } },
       skills: true,
       availabilities: { where: { isRecurring: true } },
     },
